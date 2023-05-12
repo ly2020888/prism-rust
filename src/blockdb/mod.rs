@@ -1,5 +1,5 @@
 use crate::block::proposer::genesis as proposer_genesis;
-use crate::block::voter::genesis as voter_genesis;
+use crate::block::content::genesis as voter_genesis;
 use crate::block::Block;
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};

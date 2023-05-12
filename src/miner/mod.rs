@@ -1,7 +1,7 @@
 pub mod memory_pool;
 
 use crate::block::header::Header;
-use crate::block::{proposer, transaction, voter};
+use crate::block::{proposer, transaction, content};
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
@@ -99,7 +99,7 @@ pub fn new(
     contents.push(Content::Transaction(transaction_content));
 
     for voter_idx in 0..config.voter_chains {
-        let content = voter::Content {
+        let content = content::Content {
             chain_number: voter_idx as u16,
             voter_parent: config.voter_genesis[voter_idx as usize],
             votes: vec![],

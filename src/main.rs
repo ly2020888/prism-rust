@@ -35,8 +35,8 @@ fn main() {
      (about: "Prism blockchain full client")
      (@arg verbose: -v ... "Increases the verbosity of logging")
      (@arg peer_addr: --p2p [ADDR] default_value("127.0.0.1:6000") "Sets the IP address and the port of the P2P server")
-     (@arg api_addr: --api [ADDR] default_value("127.0.0.1:7000") "Sets the IP address and the port of the API server")
-     (@arg visualization: --visual [ADDR] "Enables the visualization server and sets its address and port")
+    //  (@arg api_addr: --api [ADDR] default_value("127.0.0.1:7000") "Sets the IP address and the port of the API server")
+    //  (@arg visualization: --visual [ADDR] "Enables the visualization server and sets its address and port")
      (@arg known_peer: -c --connect ... [PEER] "Sets the peers to connect to at start")
      (@arg block_db: --blockdb [PATH] default_value("/tmp/prism-blocks.rocksdb") "Sets the path to the block database")
      (@arg utxo_db: --utxodb [PATH] default_value("/tmp/prism-utxo.rocksdb") "Sets the path to the UTXO database")
@@ -194,6 +194,7 @@ fn main() {
     debug!("Initialized UTXO database");
 
     // init blockchain database
+    // 共识层
     let blockchain =
         BlockChain::new(&matches.value_of("blockchain_db").unwrap(), config.clone()).unwrap();
     let blockchain = Arc::new(blockchain);

@@ -4,37 +4,21 @@ use crate::crypto::hash::{Hashable, H256};
 /// The header of a block.
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, Copy)]
 pub struct Header {
-    /// Hash of the parent proposer block.
-    pub parent: H256,
     /// Block creation time in UNIX format.
     pub timestamp: u128,
     /// Proof of work nonce.
     pub nonce: u32,
     /// Merkle root of the block content.
     pub content_merkle_root: H256,
-    /// Extra content for debugging purposes.
-    pub extra_content: [u8; 32],
-    /// Mining difficulty of this block.
-    pub difficulty: H256,
 }
 
 impl Header {
     /// Create a new block header.
-    pub fn new(
-        parent: H256,
-        timestamp: u128,
-        nonce: u32,
-        content_merkle_root: H256,
-        extra_content: [u8; 32],
-        difficulty: H256,
-    ) -> Self {
+    pub fn new(timestamp: u128, nonce: u32, content_merkle_root: H256) -> Self {
         Self {
-            parent,
             timestamp,
             nonce,
             content_merkle_root,
-            extra_content,
-            difficulty,
         }
     }
 }
@@ -84,23 +68,8 @@ pub mod tests {
         let nonce: u32 = 839_782;
         let content_root: H256 =
             (&hex!("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).into();
-        let extra_content: [u8; 32] = [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0,
-        ];
-        let difficulty: [u8; 32] = [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 20, 10,
-        ];
-        let difficulty = (&difficulty).into();
-        let header = Header::new(
-            parent_hash,
-            timestamp,
-            nonce,
-            content_root,
-            extra_content,
-            difficulty,
-        );
+
+        let header = Header::new(timestamp, nonce, content_root);
         header
     }
 

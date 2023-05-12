@@ -1,9 +1,8 @@
+pub mod content;
 pub mod header;
-pub mod proposer;
-pub mod transaction;
-pub mod voter;
 use crate::crypto::hash::{Hashable, H256};
 use crate::experiment::performance_counter::PayloadSize;
+use header::Header;
 
 /// A block in the Prism blockchain.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -13,9 +12,6 @@ pub struct Block {
     /// The content of the block. It could contain transactions, references, or votes, depending on
     /// the block type.
     pub content: Content,
-    /// The sortition proof of the content. In addition to the content Merkle root in block header, we are
-    /// able to verify that the block is mined on a set of content candidates.
-    pub sortition_proof: Vec<H256>,
 }
 
 impl Block {
@@ -25,24 +21,10 @@ impl Block {
         timestamp: u128,
         nonce: u32,
         content_merkle_root: H256,
-        sortition_proof: Vec<H256>,
         content: Content,
-        extra_content: [u8; 32],
-        difficulty: H256,
     ) -> Self {
-        let header = header::Header::new(
-            parent,
-            timestamp,
-            nonce,
-            content_merkle_root,
-            extra_content,
-            difficulty,
-        );
-        Self {
-            header,
-            content,
-            sortition_proof,
-        }
+        let header = Header::new(timestamp, nonce, content_merkle_root);
+        Self { header, content }
     }
 
     // TODO: use another name
@@ -52,11 +34,7 @@ impl Block {
         content: Content,
         sortition_proof: Vec<H256>,
     ) -> Self {
-        Self {
-            header,
-            content,
-            sortition_proof,
-        }
+        Self { header, content }
     }
 }
 
@@ -69,9 +47,7 @@ impl Hashable for Block {
 
 impl PayloadSize for Block {
     fn size(&self) -> usize {
-        std::mem::size_of::<header::Header>()
-            + self.content.size()
-            + self.sortition_proof.len() * std::mem::size_of::<H256>()
+        std::mem::size_of::<header::Header>() + self.content.size()
     }
 }
 
@@ -79,18 +55,15 @@ impl PayloadSize for Block {
 /// depending on the type of the block.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Content {
-    /// Transaction block content.
-    Transaction(transaction::Content),
     /// Proposer block content.
-    Proposer(proposer::Content),
+    Proposer(content::Content),
     /// Voter block content.
-    Voter(voter::Content),
+    Voter(content::Content),
 }
 
 impl Hashable for Content {
     fn hash(&self) -> H256 {
         match self {
-            Content::Transaction(c) => c.hash(),
             Content::Proposer(c) => c.hash(),
             Content::Voter(c) => c.hash(),
         }
@@ -101,7 +74,6 @@ impl PayloadSize for Content {
     fn size(&self) -> usize {
         // TODO: we are not counting the 2 bits that are used to store block type
         match self {
-            Content::Transaction(c) => c.size(),
             Content::Proposer(c) => c.size(),
             Content::Voter(c) => c.size(),
         }
@@ -112,7 +84,6 @@ impl PayloadSize for Content {
 pub mod tests {
 
     use super::*;
-    use crate::config;
     use crate::transaction::Transaction;
     use rand::Rng;
 
@@ -127,67 +98,34 @@ pub mod tests {
     pub fn proposer_block(
         parent: H256,
         timestamp: u128,
-        proposer_refs: Vec<H256>,
-        transaction_refs: Vec<H256>,
+        chain_number: u16,
+        refs: Vec<H256>,
+        transactions: Vec<Transaction>,
     ) -> Block {
-        let content = Content::Proposer(proposer::Content {
-            transaction_refs,
-            proposer_refs,
+        let content = Content::Proposer(content::Content {
+            refs,
+            transactions,
+            parent,
+            chain_number,
         });
         let content_hash = content.hash();
-        Block::new(
-            parent,
-            timestamp,
-            random_nonce!(),
-            content_hash,
-            vec![content_hash],
-            content,
-            [0u8; 32],
-            *config::DEFAULT_DIFFICULTY,
-        )
+        Block::new(parent, timestamp, random_nonce!(), content_hash, content)
     }
 
     pub fn voter_block(
         parent: H256,
         timestamp: u128,
         chain_number: u16,
-        voter_parent: H256,
-        votes: Vec<H256>,
-    ) -> Block {
-        let content = Content::Voter(voter::Content {
-            chain_number,
-            voter_parent,
-            votes,
-        });
-        let content_hash = content.hash();
-        Block::new(
-            parent,
-            timestamp,
-            random_nonce!(),
-            content_hash,
-            vec![content_hash],
-            content,
-            [0u8; 32],
-            *config::DEFAULT_DIFFICULTY,
-        )
-    }
-
-    pub fn transaction_block(
-        parent: H256,
-        timestamp: u128,
+        refs: Vec<H256>,
         transactions: Vec<Transaction>,
     ) -> Block {
-        let content = Content::Transaction(transaction::Content { transactions });
-        let content_hash = content.hash();
-        Block::new(
+        let content = Content::Voter(content::Content {
+            refs,
+            transactions,
             parent,
-            timestamp,
-            random_nonce!(),
-            content_hash,
-            vec![content_hash],
-            content,
-            [0u8; 32],
-            *config::DEFAULT_DIFFICULTY,
-        )
+            chain_number,
+        });
+        let content_hash = content.hash();
+        Block::new(parent, timestamp, random_nonce!(), content_hash, content)
     }
 }

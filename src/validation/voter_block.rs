@@ -1,5 +1,5 @@
 use super::{check_proposer_block_exists, check_voter_block_exists};
-use crate::block::voter::Content;
+use crate::block::content::Content;
 
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
