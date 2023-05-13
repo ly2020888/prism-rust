@@ -3,7 +3,6 @@ extern crate rand;
 use crate::crypto::hash::Hashable;
 use crate::transaction::{Account, Address, Authorization, Transaction};
 use ed25519_dalek::Keypair;
-use ed25519_dalek::Signature;
 use ed25519_dalek::{SignatureError, Signer};
 use rand::rngs::OsRng;
 use std::fmt;

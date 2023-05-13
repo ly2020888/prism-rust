@@ -4,6 +4,8 @@ use crate::crypto::hash::{Hashable, H256};
 /// The header of a block.
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, Copy)]
 pub struct Header {
+    /// Hash of the parent voter block.
+    pub parent: H256,
     /// Block creation time in UNIX format.
     pub timestamp: u128,
     /// Proof of work nonce.
@@ -14,8 +16,9 @@ pub struct Header {
 
 impl Header {
     /// Create a new block header.
-    pub fn new(timestamp: u128, nonce: u32, content_merkle_root: H256) -> Self {
+    pub fn new(parent: H256, timestamp: u128, nonce: u32, content_merkle_root: H256) -> Self {
         Self {
+            parent,
             timestamp,
             nonce,
             content_merkle_root,
@@ -69,7 +72,7 @@ pub mod tests {
         let content_root: H256 =
             (&hex!("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).into();
 
-        let header = Header::new(timestamp, nonce, content_root);
+        let header = Header::new(parent_hash, timestamp, nonce, content_root);
         header
     }
 

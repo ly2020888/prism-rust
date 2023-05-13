@@ -5,8 +5,8 @@ use crate::crypto::hash::{Hashable, H256};
 use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 use bincode::{deserialize, serialize};
 use log::{debug, info, warn};
-use rocksdb::{ColumnFamilyDescriptor, Options, WriteBatch, DB};
-use statrs::distribution::{Discrete, Poisson, Univariate};
+use rocksdb::{ColumnFamilyDescriptor, MergeOperands, Options, WriteBatch, DB};
+use statrs::distribution::{Discrete, Poisson};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -40,11 +40,8 @@ pub type Result<T> = std::result::Result<T, rocksdb::Error>;
 
 pub struct BlockChain {
     db: DB,
-    proposer_best_level: Mutex<u64>,
-    voter_best: Vec<Mutex<(H256, u64)>>,
-    unreferred_transactions: Mutex<HashSet<H256>>,
-    unreferred_proposers: Mutex<HashSet<H256>>,
     unconfirmed_proposers: Mutex<HashSet<H256>>,
+    unreferred_proposers: Mutex<HashSet<H256>>,
     proposer_ledger_tip: Mutex<u64>,
     voter_ledger_tips: Mutex<Vec<H256>>,
     config: BlockchainConfig,
@@ -65,7 +62,7 @@ impl BlockChain {
             }};
             ($cf:expr, $merge_op:expr) => {{
                 let mut cf_option = Options::default();
-                cf_option.set_merge_operator("mo", $merge_op, None);
+                cf_option.set_merge_operator("mo", $merge_op, $merge_op);
                 let cf = ColumnFamilyDescriptor::new($cf, cf_option);
                 cfs.push(cf);
             }};
@@ -97,11 +94,8 @@ impl BlockChain {
 
         let blockchain_db = Self {
             db,
-            proposer_best_level: Mutex::new(0),
-            voter_best,
-            unreferred_transactions: Mutex::new(HashSet::new()),
-            unreferred_proposers: Mutex::new(HashSet::new()),
             unconfirmed_proposers: Mutex::new(HashSet::new()),
+            unreferred_proposers: Mutex::new(HashSet::new()),
             proposer_ledger_tip: Mutex::new(0),
             voter_ledger_tips: Mutex::new(vec![H256::default(); config.voter_chains as usize]),
             config,
@@ -138,36 +132,34 @@ impl BlockChain {
             proposer_node_level_cf,
             serialize(&db.config.proposer_genesis).unwrap(),
             serialize(&(0 as u64)).unwrap(),
-        )?;
+        );
         wb.merge_cf(
             proposer_tree_level_cf,
             serialize(&(0 as u64)).unwrap(),
             serialize(&db.config.proposer_genesis).unwrap(),
-        )?;
-        let mut unreferred_proposers = db.unreferred_proposers.lock().unwrap();
-        unreferred_proposers.insert(db.config.proposer_genesis);
-        drop(unreferred_proposers);
+        );
+
         wb.put_cf(
             proposer_leader_sequence_cf,
             serialize(&(0 as u64)).unwrap(),
             serialize(&db.config.proposer_genesis).unwrap(),
-        )?;
+        );
         let proposer_genesis_ledger: Vec<H256> = vec![db.config.proposer_genesis];
         wb.put_cf(
             proposer_ledger_order_cf,
             serialize(&(0 as u64)).unwrap(),
             serialize(&proposer_genesis_ledger).unwrap(),
-        )?;
+        );
         wb.put_cf(
             proposer_ref_neighbor_cf,
             serialize(&db.config.proposer_genesis).unwrap(),
             serialize(&Vec::<H256>::new()).unwrap(),
-        )?;
+        );
         wb.put_cf(
             transaction_ref_neighbor_cf,
             serialize(&db.config.proposer_genesis).unwrap(),
             serialize(&Vec::<H256>::new()).unwrap(),
-        )?;
+        );
 
         // voter genesis blocks
         let mut voter_ledger_tips = db.voter_ledger_tips.lock().unwrap();
@@ -176,45 +168,43 @@ impl BlockChain {
                 parent_neighbor_cf,
                 serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
                 serialize(&db.config.proposer_genesis).unwrap(),
-            )?;
+            );
             wb.merge_cf(
                 vote_neighbor_cf,
                 serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
                 serialize(&db.config.proposer_genesis).unwrap(),
-            )?;
+            );
             wb.merge_cf(
                 proposer_vote_count_cf,
                 serialize(&db.config.proposer_genesis).unwrap(),
                 serialize(&(1 as u64)).unwrap(),
-            )?;
+            );
             wb.merge_cf(
                 proposer_node_vote_cf,
                 serialize(&db.config.proposer_genesis).unwrap(),
                 serialize(&(true, chain_num as u16, 0 as u64)).unwrap(),
-            )?;
+            );
             wb.put_cf(
                 voter_node_level_cf,
                 serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
                 serialize(&(0 as u64)).unwrap(),
-            )?;
+            );
             wb.put_cf(
                 voter_node_voted_level_cf,
                 serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
                 serialize(&(0 as u64)).unwrap(),
-            )?;
+            );
             wb.put_cf(
                 voter_node_chain_cf,
                 serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
                 serialize(&(chain_num as u16)).unwrap(),
-            )?;
+            );
             wb.merge_cf(
                 voter_tree_level_count_cf,
                 serialize(&(chain_num as u16, 0 as u64)).unwrap(),
                 serialize(&(1 as u64)).unwrap(),
-            )?;
-            let mut voter_best = db.voter_best[chain_num as usize].lock().unwrap();
-            voter_best.0 = db.config.voter_genesis[chain_num as usize];
-            drop(voter_best);
+            );
+
             voter_ledger_tips[chain_num as usize] = db.config.voter_genesis[chain_num as usize];
         }
         drop(voter_ledger_tips);
@@ -256,13 +246,13 @@ impl BlockChain {
 
         macro_rules! put_value {
             ($cf:expr, $key:expr, $value:expr) => {{
-                wb.put_cf($cf, serialize(&$key).unwrap(), serialize(&$value).unwrap())?;
+                wb.put_cf($cf, serialize(&$key).unwrap(), serialize(&$value).unwrap());
             }};
         }
 
         macro_rules! merge_value {
             ($cf:expr, $key:expr, $value:expr) => {{
-                wb.merge_cf($cf, serialize(&$key).unwrap(), serialize(&$value).unwrap())?;
+                wb.merge_cf($cf, serialize(&$key).unwrap(), serialize(&$value).unwrap());
             }};
         }
 
@@ -276,13 +266,9 @@ impl BlockChain {
                 // add ref'ed blocks
                 // note that the parent is the first proposer block that we refer
                 let mut refed_proposer: Vec<H256> = vec![parent_hash];
-                refed_proposer.extend(&content.proposer_refs);
+                refed_proposer.extend(&content.refs);
                 put_value!(proposer_ref_neighbor_cf, block_hash, refed_proposer);
-                put_value!(
-                    transaction_ref_neighbor_cf,
-                    block_hash,
-                    content.transaction_refs
-                );
+
                 // get current block level
                 let parent_level: u64 = get_value!(proposer_node_level_cf, parent_hash);
                 let self_level = parent_level + 1;
@@ -310,34 +296,17 @@ impl BlockChain {
                 unconfirmed_proposers.insert(block_hash);
                 drop(unconfirmed_proposers);
 
-                // commit to the database and update proposer best in the same atomic operation
-                // These two happen together to ensure that if a voter/proposer/transaction block
-                // depend on this proposer block, the miner must have already known about this
-                // proposer block and is using it as the proposer parent.
-                let mut proposer_best = self.proposer_best_level.lock().unwrap();
-                self.db.write(wb)?;
-                if self_level > *proposer_best {
-                    *proposer_best = self_level;
-                    PERFORMANCE_COUNTER.record_update_proposer_main_chain(self_level as usize);
-                }
-                drop(proposer_best);
-
                 // remove referenced proposer and transaction blocks from the unreferred list
                 // This could happen after committing to the database. It's because that we are
                 // only removing transaction blocks here, and the entries we are trying to remove
                 // are guaranteed to be already there (since they are inserted before the
                 // corresponding transaction blocks are committed).
                 let mut unreferred_proposers = self.unreferred_proposers.lock().unwrap();
-                for ref_hash in &content.proposer_refs {
+                for ref_hash in &content.refs {
                     unreferred_proposers.remove(&ref_hash);
                 }
                 unreferred_proposers.remove(&parent_hash);
                 drop(unreferred_proposers);
-                let mut unreferred_transactions = self.unreferred_transactions.lock().unwrap();
-                for ref_hash in &content.transaction_refs {
-                    unreferred_transactions.remove(&ref_hash);
-                }
-                drop(unreferred_transactions);
 
                 debug!(
                     "Adding proposer block {:.8} at level {}",
@@ -346,66 +315,56 @@ impl BlockChain {
             }
             Content::Voter(content) => {
                 // add voter parent
-                let voter_parent_hash = content.voter_parent;
-                put_value!(voter_parent_neighbor_cf, block_hash, voter_parent_hash);
-                // get current block level and chain number
-                let voter_parent_level: u64 = get_value!(voter_node_level_cf, voter_parent_hash);
-                let voter_parent_chain: u16 = get_value!(voter_node_chain_cf, voter_parent_hash);
-                let self_level = voter_parent_level + 1;
-                let self_chain = voter_parent_chain;
-                // set current block level and chain number
-                put_value!(voter_node_level_cf, block_hash, self_level as u64);
-                put_value!(voter_node_chain_cf, block_hash, self_chain as u16);
-                merge_value!(
-                    voter_tree_level_count_cf,
-                    (self_chain as u16, self_level as u64),
-                    1 as u64
-                );
-                // add voting blocks for the proposer
-                for proposer_hash in &content.votes {
-                    merge_value!(proposer_vote_count_cf, proposer_hash, 1 as u64);
-                }
-                // add voted blocks and set deepest voted level
-                put_value!(vote_neighbor_cf, block_hash, content.votes);
-                // set the voted level to be until proposer parent
-                let proposer_parent_level: u64 = get_value!(proposer_node_level_cf, parent_hash);
-                put_value!(
-                    voter_node_voted_level_cf,
-                    block_hash,
-                    proposer_parent_level as u64
-                );
+                // let voter_parent_hash = content.parent;
+                // put_value!(voter_parent_neighbor_cf, block_hash, voter_parent_hash);
+                // // get current block level and chain number
+                // let voter_parent_level: u64 = get_value!(voter_node_level_cf, voter_parent_hash);
+                // let voter_parent_chain: u16 = get_value!(voter_node_chain_cf, voter_parent_hash);
+                // let self_level = voter_parent_level + 1;
+                // let self_chain = voter_parent_chain;
+                // // set current block level and chain number
+                // put_value!(voter_node_level_cf, block_hash, self_level as u64);
+                // put_value!(voter_node_chain_cf, block_hash, self_chain as u16);
+                // merge_value!(
+                //     voter_tree_level_count_cf,
+                //     (self_chain as u16, self_level as u64),
+                //     1 as u64
+                // );
+                // // add voting blocks for the proposer
+                // // FIXME: 请在这里修改协议
+                // for proposer_hash in &content.refs {
+                //     merge_value!(proposer_vote_count_cf, proposer_hash, 1 as u64);
+                // }
+                // // add voted blocks and set deepest voted level
+                // put_value!(vote_neighbor_cf, block_hash, content.votes);
+                // // set the voted level to be until proposer parent
+                // let proposer_parent_level: u64 = get_value!(proposer_node_level_cf, parent_hash);
+                // put_value!(
+                //     voter_node_voted_level_cf,
+                //     block_hash,
+                //     proposer_parent_level as u64
+                // );
 
-                self.db.write(wb)?;
+                // self.db.write(wb)?;
 
-                // This should happen after writing to db, because other modules will follow
-                // voter_best to query its metadata. We need to get the metadata into database
-                // before we can "announce" this block to other modules. Also, this does not create
-                // race condition, since this update is "stateless" - we are not append/removing
-                // from a record.
-                let mut voter_best = self.voter_best[self_chain as usize].lock().unwrap();
-                // update best block
-                if self_level > voter_best.1 {
-                    PERFORMANCE_COUNTER
-                        .record_update_voter_main_chain(voter_best.1 as usize, self_level as usize);
-                    voter_best.0 = block_hash;
-                    voter_best.1 = self_level;
-                }
-                drop(voter_best);
-                debug!(
-                    "Adding voter block {:.8} at chain {} level {}",
-                    block_hash, self_chain, self_level
-                );
-            }
-            Content::Transaction(_content) => {
-                // mark itself as unreferred
-                // Note that this could happen before committing to db, because no module will try
-                // to access transaction content based on pointers in unreferred_transactions.
-                let mut unreferred_transactions = self.unreferred_transactions.lock().unwrap();
-                unreferred_transactions.insert(block_hash);
-                drop(unreferred_transactions);
-
-                // This db write is only to facilitate check_existence
-                self.db.write(wb)?;
+                // // This should happen after writing to db, because other modules will follow
+                // // voter_best to query its metadata. We need to get the metadata into database
+                // // before we can "announce" this block to other modules. Also, this does not create
+                // // race condition, since this update is "stateless" - we are not append/removing
+                // // from a record.
+                // let mut voter_best = self.voter_best[self_chain as usize].lock().unwrap();
+                // // update best block
+                // if self_level > voter_best.1 {
+                //     PERFORMANCE_COUNTER
+                //         .record_update_voter_main_chain(voter_best.1 as usize, self_level as usize);
+                //     voter_best.0 = block_hash;
+                //     voter_best.1 = self_level;
+                // }
+                // drop(voter_best);
+                // debug!(
+                //     "Adding voter block {:.8} at chain {} level {}",
+                //     block_hash, self_chain, self_level
+                // );
             }
         }
         Ok(())
@@ -432,7 +391,7 @@ impl BlockChain {
         let mut wb = WriteBatch::default();
         macro_rules! merge_value {
             ($cf:expr, $key:expr, $value:expr) => {{
-                wb.merge_cf($cf, serialize(&$key).unwrap(), serialize(&$value).unwrap())?;
+                wb.merge_cf($cf, serialize(&$key).unwrap(), serialize(&$value).unwrap());
             }};
         }
 
@@ -1592,7 +1551,7 @@ impl BlockChain {
 fn vote_vec_merge(
     _: &[u8],
     existing_val: Option<&[u8]>,
-    operands: &mut rocksdb::merge_operator::MergeOperands,
+    operands: &rocksdb::merge_operator::MergeOperands,
 ) -> Option<Vec<u8>> {
     let mut existing: Vec<(u16, u64)> = match existing_val {
         Some(v) => deserialize(v).unwrap(),
@@ -1622,7 +1581,7 @@ fn vote_vec_merge(
 fn h256_vec_append_merge(
     _: &[u8],
     existing_val: Option<&[u8]>,
-    operands: &mut rocksdb::merge_operator::MergeOperands,
+    operands: &MergeOperands,
 ) -> Option<Vec<u8>> {
     let mut existing: Vec<H256> = match existing_val {
         Some(v) => deserialize(v).unwrap(),
@@ -1641,7 +1600,7 @@ fn h256_vec_append_merge(
 fn u64_plus_merge(
     _: &[u8],
     existing_val: Option<&[u8]>,
-    operands: &mut rocksdb::merge_operator::MergeOperands,
+    operands: &rocksdb::merge_operator::MergeOperands,
 ) -> Option<Vec<u8>> {
     let mut existing: u64 = match existing_val {
         Some(v) => deserialize(v).unwrap(),

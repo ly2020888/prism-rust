@@ -1,8 +1,7 @@
 use crate::crypto::hash::{Hashable, H256};
-use crate::transaction::{CoinId, Input, Transaction};
+use crate::transaction::Transaction;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::collections::VecDeque;
 
 /// transactions storage
 #[derive(Debug)]
@@ -15,8 +14,7 @@ pub struct MemoryPool {
     counter: u64,
     /// By-hash storage
     by_hash: HashMap<H256, Entry>,
-    /// Transactions by previous output, formatted as Input
-    by_input: HashMap<Input, H256>,
+
     /// Storage for order by storage index, it is equivalent to FIFO
     by_storage_index: BTreeMap<u64, H256>,
 }
@@ -36,7 +34,6 @@ impl MemoryPool {
             max_transactions: size_limit,
             counter: 0,
             by_hash: HashMap::new(),
-            by_input: HashMap::new(),
             by_storage_index: BTreeMap::new(),
         }
     }
@@ -53,11 +50,6 @@ impl MemoryPool {
             storage_index: self.counter,
         };
         self.counter += 1;
-
-        // associate all inputs with this transaction
-        for input in &entry.transaction.input {
-            self.by_input.insert(input.clone(), hash);
-        }
 
         // add to btree
         self.by_storage_index.insert(entry.storage_index, hash);
@@ -79,17 +71,8 @@ impl MemoryPool {
         self.by_hash.contains_key(h)
     }
 
-    /// Check whether the input of a tx is already recorded. If so, this tx is a double spend.
-    /// When adding tx into mempool, should check this.
-    pub fn is_double_spend(&self, inputs: &[Input]) -> bool {
-        inputs.iter().any(|input| self.by_input.contains_key(input))
-    }
-
     fn remove_and_get(&mut self, hash: &H256) -> Option<Entry> {
         let entry = self.by_hash.remove(hash)?;
-        for input in &entry.transaction.input {
-            self.by_input.remove(&input);
-        }
         self.by_storage_index.remove(&entry.storage_index);
         self.num_transactions -= 1;
         Some(entry)
@@ -98,31 +81,6 @@ impl MemoryPool {
     /// Remove a tx by its hash, also remove its recorded inputs
     pub fn remove_by_hash(&mut self, hash: &H256) {
         self.remove_and_get(hash);
-    }
-
-    /// Remove potential tx that use this input.
-    /// This function runs recursively, so it may remove more transactions.
-    pub fn remove_by_input(&mut self, prevout: &Input) {
-        //use a deque to recursively remove, in case there are multi level dependency between txs.
-        let mut queue: VecDeque<Input> = VecDeque::new();
-        queue.push_back(prevout.clone());
-
-        while let Some(prevout) = queue.pop_front() {
-            if let Some(entry_hash) = self.by_input.get(&prevout) {
-                let entry_hash = *entry_hash;
-                let entry = self.remove_and_get(&entry_hash).unwrap();
-                for (index, output) in entry.transaction.output.iter().enumerate() {
-                    queue.push_back(Input {
-                        coin: CoinId {
-                            hash: entry_hash,
-                            index: index as u32,
-                        },
-                        value: output.value,
-                        owner: output.recipient,
-                    });
-                }
-            }
-        }
     }
 
     /// get n transaction by fifo

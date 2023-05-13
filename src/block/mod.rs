@@ -23,7 +23,7 @@ impl Block {
         content_merkle_root: H256,
         content: Content,
     ) -> Self {
-        let header = Header::new(timestamp, nonce, content_merkle_root);
+        let header = Header::new(parent, timestamp, nonce, content_merkle_root);
         Self { header, content }
     }
 

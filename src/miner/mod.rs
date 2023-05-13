@@ -1,7 +1,7 @@
 pub mod memory_pool;
 
+use crate::block::content;
 use crate::block::header::Header;
-use crate::block::{proposer, transaction, content};
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
@@ -35,14 +35,10 @@ enum ControlSignal {
 
 #[derive(Ord, Eq, PartialOrd, PartialEq)]
 pub enum ContextUpdateSignal {
-    // TODO: New transaction comes, we update transaction block's content
-    //NewTx,//should be called: mem pool change
     // New proposer block comes, we need to update all contents' parent
-    NewProposerBlock,
+    NewProposerBlock(u16),
     // New voter block comes, we need to update that voter chain
     NewVoterBlock(u16),
-    // New transaction block comes, we need to update proposer content's tx ref
-    NewTransactionBlock,
 }
 
 enum OperatingState {
@@ -87,7 +83,7 @@ pub fn new(
     let (signal_chan_sender, signal_chan_receiver) = unbounded();
     let mut contents: Vec<Content> = vec![];
 
-    let proposer_content = proposer::Content {
+    let proposer_content = content::Content {
         transaction_refs: vec![],
         proposer_refs: vec![],
     };
