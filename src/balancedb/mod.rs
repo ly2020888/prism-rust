@@ -43,7 +43,8 @@ impl BalanceDatabase {
         let iter = self.db.iterator_opt(rocksdb::IteratorMode::Start, iter_opt);
         let mut inited = false;
         let mut checksum: Vec<u8> = vec![];
-        for Ok((k, _v)) in iter {
+        for i in iter {
+            let (k, _v) = i?;
             if !inited {
                 checksum = vec![0; k.as_ref().len()];
                 inited = true;
@@ -88,9 +89,11 @@ impl BalanceDatabase {
                 None => return Ok(()),
             }
 
-            let signed_account: Address =
-                ring::digest::digest(&ring::digest::SHA256, &t.authorization.unwrap().pubkey)
-                    .into();
+            let signed_account: Address = ring::digest::digest(
+                &ring::digest::SHA256,
+                &t.authorization.as_ref().unwrap().pubkey,
+            )
+            .into();
 
             if signed_account != input_account {
                 return Ok(());

@@ -1,5 +1,5 @@
 use crate::crypto::hash::{Hashable, H256};
-use crate::experiment::performance_counter::PayloadSize;
+//use crate::experiment::performance_counter::PayloadSize;
 use bincode::serialize;
 use std::time::SystemTime;
 /// An address of a user. It is the SHA256 hash of the user's public key.
@@ -30,15 +30,15 @@ pub struct Transaction {
     pub time_stamp: SystemTime,
 }
 
-impl PayloadSize for Transaction {
-    /// Return the size in bytes
-    fn size(&self) -> usize {
-        std::mem::size_of::<Address>()
-            + std::mem::size_of::<Address>()
-            + std::mem::size_of::<Authorization>()
-            + std::mem::size_of::<H256>()
-    }
-}
+// impl PayloadSize for Transaction {
+//     /// Return the size in bytes
+//     fn size(&self) -> usize {
+//         std::mem::size_of::<Address>()
+//             + std::mem::size_of::<Address>()
+//             + std::mem::size_of::<Authorization>()
+//             + std::mem::size_of::<H256>()
+//     }
+// }
 
 impl Hashable for Transaction {
     fn hash(&self) -> H256 {

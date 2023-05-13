@@ -1,7 +1,7 @@
 pub mod content;
 pub mod header;
 use crate::crypto::hash::{Hashable, H256};
-use crate::experiment::performance_counter::PayloadSize;
+//use crate::experiment::performance_counter::PayloadSize;
 use header::Header;
 
 /// A block in the Prism blockchain.
@@ -45,11 +45,11 @@ impl Hashable for Block {
     }
 }
 
-impl PayloadSize for Block {
-    fn size(&self) -> usize {
-        std::mem::size_of::<header::Header>() + self.content.size()
-    }
-}
+// impl PayloadSize for Block {
+//     fn size(&self) -> usize {
+//         std::mem::size_of::<header::Header>() + self.content.size()
+//     }
+// }
 
 /// The content of a block. It could be transaction content, proposer content, or voter content,
 /// depending on the type of the block.
@@ -70,15 +70,15 @@ impl Hashable for Content {
     }
 }
 
-impl PayloadSize for Content {
-    fn size(&self) -> usize {
-        // TODO: we are not counting the 2 bits that are used to store block type
-        match self {
-            Content::Proposer(c) => c.size(),
-            Content::Voter(c) => c.size(),
-        }
-    }
-}
+// impl PayloadSize for Content {
+//     fn size(&self) -> usize {
+//         // TODO: we are not counting the 2 bits that are used to store block type
+//         match self {
+//             Content::Proposer(c) => c.size(),
+//             Content::Voter(c) => c.size(),
+//         }
+//     }
+// }
 
 #[cfg(any(test, feature = "test-utilities"))]
 pub mod tests {
@@ -101,12 +101,16 @@ pub mod tests {
         chain_number: u16,
         refs: Vec<H256>,
         transactions: Vec<Transaction>,
+        weight: u64,
+        height: u64,
     ) -> Block {
         let content = Content::Proposer(content::Content {
             refs,
             transactions,
             parent,
             chain_number,
+            weight,
+            height,
         });
         let content_hash = content.hash();
         Block::new(parent, timestamp, random_nonce!(), content_hash, content)
@@ -118,12 +122,16 @@ pub mod tests {
         chain_number: u16,
         refs: Vec<H256>,
         transactions: Vec<Transaction>,
+        weight: u64,
+        height: u64,
     ) -> Block {
         let content = Content::Voter(content::Content {
             refs,
             transactions,
             parent,
             chain_number,
+            weight,
+            height,
         });
         let content_hash = content.hash();
         Block::new(parent, timestamp, random_nonce!(), content_hash, content)

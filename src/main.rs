@@ -1,24 +1,30 @@
 #[macro_use]
 extern crate clap;
 
+use base64::{
+    alphabet,
+    engine::{self, general_purpose},
+    Engine as _,
+};
+use clap::Command;
 use crossbeam::channel;
 use ed25519_dalek::Keypair;
 use log::{debug, error, info};
-use piper;
-use prism::api::Server as ApiServer;
+use tokio::sync::mpsc;
+// use prism::api::Server as ApiServer;
 use prism::blockchain::BlockChain;
 use prism::blockdb::BlockDatabase;
 use prism::config::BlockchainConfig;
 use prism::crypto::hash::H256;
-use prism::experiment::transaction_generator::TransactionGenerator;
-use prism::ledger_manager::LedgerManager;
+// use prism::experiment::transaction_generator::TransactionGenerator;
+// use prism::ledger_manager::LedgerManager;
+use prism::balancedb::BalanceDatabase;
 use prism::miner;
 use prism::miner::memory_pool::MemoryPool;
 use prism::network::server;
 use prism::network::worker;
 use prism::transaction::Address;
-use prism::utxodb::UtxoDatabase;
-use prism::visualization::Server as VisualizationServer;
+// use prism::visualization::Server as VisualizationServer;
 use prism::wallet::Wallet;
 use rand::rngs::OsRng;
 use std::convert::TryInto;
@@ -30,40 +36,40 @@ use std::time;
 
 fn main() {
     // parse command line arguments
-    let matches = clap_app!(Prism =>
-     (version: "0.1")
-     (about: "Prism blockchain full client")
-     (@arg verbose: -v ... "Increases the verbosity of logging")
-     (@arg peer_addr: --p2p [ADDR] default_value("127.0.0.1:6000") "Sets the IP address and the port of the P2P server")
-    //  (@arg api_addr: --api [ADDR] default_value("127.0.0.1:7000") "Sets the IP address and the port of the API server")
-    //  (@arg visualization: --visual [ADDR] "Enables the visualization server and sets its address and port")
-     (@arg known_peer: -c --connect ... [PEER] "Sets the peers to connect to at start")
-     (@arg block_db: --blockdb [PATH] default_value("/tmp/prism-blocks.rocksdb") "Sets the path to the block database")
-     (@arg utxo_db: --utxodb [PATH] default_value("/tmp/prism-utxo.rocksdb") "Sets the path to the UTXO database")
-     (@arg blockchain_db: --blockchaindb [PATH] default_value("/tmp/prism-blockchain.rocksdb") "Sets the path to the blockchain database")
-     (@arg wallet_db: --walletdb [PATH] default_value("/tmp/prism-wallet.rocksdb") "Sets the path to the wallet database")
-     (@arg init_fund_addr: --("fund-addr") ... [ADDR] "Endows the given address an initial fund in the genesis block")
-     (@arg init_fund_coins: --("fund-coins") [INT] default_value("50000") "Sets the number of initial coins for each address")
-     (@arg init_fund_value: --("fund-value") [INT] default_value("100") "Sets the value of each initial coin")
-     (@arg load_key_path: --("load-key") ... [PATH] "Loads a key pair into the wallet from the given path")
-     (@arg mempool_size: --("mempool-size") [INT] default_value("500000") "Sets the maximum number of transactions for the memory pool")
-     (@arg execution_workers: --("execution-workers") [INT] default_value("8") "Sets the number of worker threads for transaction execution")
-     (@arg execution_buffer: --("execution-buffer") [INT] default_value("3") "Sets the size of the buffer between pipeline stages in transaction execution")
-     (@arg p2p_workers: --("p2p-workers") [INT] default_value("16") "Sets the number of worker threads for P2P server")
-     (@arg voter_chains: --("voter-chains") [INT] default_value("1000") "Sets the number of voter chains")
-     (@arg tx_throughput: --("tx-throughput") [INT] default_value("80000") "Sets the target transaction throughput")
-     (@arg tx_block_size: --("tx-block-size") [INT] default_value("64000") "Sets the maximum size of the transaction block in Bytes")
-     (@arg proposer_mining_rate: --("proposer-mining-rate") [FLOAT] default_value("0.1") "Sets the proposer chain mining rate")
-     (@arg voter_mining_rate: --("voter-mining-rate") [FLOAT] default_value("0.1") "Sets the voter chain mining rate")
-     (@arg adv_ratio: --("adversary-ratio") [FLOAT] default_value("0.4") "Sets the ratio of adversary hashing power")
-     (@arg log_epsilon: --("confirm-confidence") [FLOAT] default_value("20.0") "Sets -log(epsilon) for confirmation")
+    let matches = Command::new("prism")
+        .args(&[
+            arg!(--config <FILE> "a required file for the configuration and no short"),
+            //  (@arg verbose: -v ... "Increases the verbosity of logging")
+            //  (@arg peer_addr: --p2p [ADDR] default_value("127.0.0.1:6000") "Sets the IP address and the port of the P2P server")
+            // //  (@arg api_addr: --api [ADDR] default_value("127.0.0.1:7000") "Sets the IP address and the port of the API server")
+            // //  (@arg visualization: --visual [ADDR] "Enables the visualization server and sets its address and port")
+            //  (@arg known_peer: -c --connect ... [PEER] "Sets the peers to connect to at start")
+            //  (@arg block_db: --blockdb [PATH] default_value("/tmp/prism-blocks.rocksdb") "Sets the path to the block database")
+            //  (@arg utxo_db: --utxodb [PATH] default_value("/tmp/prism-utxo.rocksdb") "Sets the path to the UTXO database")
+            //  (@arg blockchain_db: --blockchaindb [PATH] default_value("/tmp/prism-blockchain.rocksdb") "Sets the path to the blockchain database")
+            //  (@arg wallet_db: --walletdb [PATH] default_value("/tmp/prism-wallet.rocksdb") "Sets the path to the wallet database")
+            //  (@arg init_fund_addr: --("fund-addr") ... [ADDR] "Endows the given address an initial fund in the genesis block")
+            //  (@arg init_fund_coins: --("fund-coins") [INT] default_value("50000") "Sets the number of initial coins for each address")
+            //  (@arg init_fund_value: --("fund-value") [INT] default_value("100") "Sets the value of each initial coin")
+            //  (@arg load_key_path: --("load-key") ... [PATH] "Loads a key pair into the wallet from the given path")
+            //  (@arg mempool_size: --("mempool-size") [INT] default_value("500000") "Sets the maximum number of transactions for the memory pool")
+            //  (@arg execution_workers: --("execution-workers") [INT] default_value("8") "Sets the number of worker threads for transaction execution")
+            //  (@arg execution_buffer: --("execution-buffer") [INT] default_value("3") "Sets the size of the buffer between pipeline stages in transaction execution")
+            //  (@arg p2p_workers: --("p2p-workers") [INT] default_value("16") "Sets the number of worker threads for P2P server")
+            //  (@arg voter_chains: --("voter-chains") [INT] default_value("1000") "Sets the number of voter chains")
+            //  (@arg tx_throughput: --("tx-throughput") [INT] default_value("80000") "Sets the target transaction throughput")
+            //  (@arg tx_block_size: --("tx-block-size") [INT] default_value("64000") "Sets the maximum size of the transaction block in Bytes")
+            //  (@arg proposer_mining_rate: --("proposer-mining-rate") [FLOAT] default_value("0.1") "Sets the proposer chain mining rate")
+            //  (@arg voter_mining_rate: --("voter-mining-rate") [FLOAT] default_value("0.1") "Sets the voter chain mining rate")
+            //  (@arg adv_ratio: --("adversary-ratio") [FLOAT] default_value("0.4") "Sets the ratio of adversary hashing power")
+            //  (@arg log_epsilon: --("confirm-confidence") [FLOAT] default_value("20.0") "Sets -log(epsilon) for confirmation")
 
-     (@subcommand keygen =>
-      (about: "Generates Prism wallet key pair")
-      (@arg display_address: --addr "Prints the address of the key pair to STDERR")
-     )
-    )
-    .get_matches();
+            //  (@subcommand keygen =>
+            //   (about: "Generates Prism wallet key pair")
+            //   (@arg display_address: --addr "Prints the address of the key pair to STDERR")
+            //  )
+        ])
+        .get_matches();
 
     // match subcommands
     match matches.subcommand() {
@@ -189,7 +195,7 @@ fn main() {
     debug!("Initialized block database");
 
     // init utxo database
-    let utxodb = UtxoDatabase::new(&matches.value_of("utxo_db").unwrap()).unwrap();
+    let utxodb = BalanceDatabase::new(&matches.value_of("utxo_db").unwrap()).unwrap();
     let utxodb = Arc::new(utxodb);
     debug!("Initialized UTXO database");
 
@@ -201,7 +207,7 @@ fn main() {
     debug!("Initialized blockchain database");
 
     // init wallet database
-    let wallet = Wallet::new(&matches.value_of("wallet_db").unwrap()).unwrap();
+    let wallet = Wallet::new(&matches.value_of("wallet_db").unwrap());
     let wallet = Arc::new(wallet);
     debug!("Initialized wallet");
 
@@ -215,7 +221,8 @@ fn main() {
                     process::exit(1);
                 }
             };
-            let decoded = match base64::decode(&content.trim()) {
+            let engine = Engine {};
+            let decoded = match Engine::base64::decode(&content.trim()) {
                 Ok(d) => d,
                 Err(e) => {
                     error!("Error decoding key pair at {}: {}", &key_path, &e);

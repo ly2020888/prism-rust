@@ -1,34 +1,36 @@
 use super::buffer::BlockBuffer;
 use super::message::Message;
 use super::peer;
+use crate::balancedb::BalanceDatabase;
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};
-use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 use crate::handler::new_transaction;
 use crate::handler::new_validated_block;
 use crate::miner::memory_pool::MemoryPool;
 use crate::miner::ContextUpdateSignal;
 use crate::network::server::Handle as ServerHandle;
-use crate::utxodb::UtxoDatabase;
 use crate::validation::{self, BlockResult};
 use crate::wallet::Wallet;
 use crossbeam::channel;
 use log::{debug, warn};
 use std::collections::HashSet;
-
 use std::sync::{Arc, Mutex};
 use std::thread;
+use tokio::runtime;
+use tokio::sync::mpsc::Receiver;
+
+type MsgChan = Arc<Mutex<Receiver<(Vec<u8>, peer::Handle)>>>;
 
 #[derive(Clone)]
 pub struct Context {
-    msg_chan: piper::Receiver<(Vec<u8>, peer::Handle)>,
+    msg_chan: MsgChan,
     num_worker: usize,
     chain: Arc<BlockChain>,
     blockdb: Arc<BlockDatabase>,
-    utxodb: Arc<UtxoDatabase>,
+    balancedb: Arc<BalanceDatabase>,
     wallet: Arc<Wallet>,
     mempool: Arc<Mutex<MemoryPool>>,
     context_update_chan: channel::Sender<ContextUpdateSignal>,
@@ -41,10 +43,10 @@ pub struct Context {
 
 pub fn new(
     num_worker: usize,
-    msg_src: piper::Receiver<(Vec<u8>, peer::Handle)>,
+    msg_src: MsgChan,
     blockchain: &Arc<BlockChain>,
     blockdb: &Arc<BlockDatabase>,
-    utxodb: &Arc<UtxoDatabase>,
+    balancedb: &Arc<BalanceDatabase>,
     wallet: &Arc<Wallet>,
     mempool: &Arc<Mutex<MemoryPool>>,
     ctx_update_sink: channel::Sender<ContextUpdateSignal>,
@@ -56,7 +58,7 @@ pub fn new(
         num_worker,
         chain: Arc::clone(blockchain),
         blockdb: Arc::clone(blockdb),
-        utxodb: Arc::clone(utxodb),
+        balancedb: Arc::clone(balancedb),
         wallet: Arc::clone(wallet),
         mempool: Arc::clone(mempool),
         context_update_chan: ctx_update_sink,
@@ -82,8 +84,15 @@ impl Context {
 
     fn worker_loop(&self) {
         loop {
-            let msg = futures::executor::block_on(self.msg_chan.recv()).unwrap();
-            PERFORMANCE_COUNTER.record_process_message();
+            let rt = runtime::Runtime::new().unwrap();
+
+            let msg = rt
+                .block_on(async {
+                    let mut msg_chan = self.msg_chan.lock().unwrap();
+                    msg_chan.recv().await
+                })
+                .unwrap();
+            // PERFORMANCE_COUNTER.record_process_message();
             let (msg, mut peer) = msg;
             let msg: Message = bincode::deserialize(&msg).unwrap();
             match msg {
@@ -178,14 +187,6 @@ impl Context {
                         requested_blocks.remove(&hash);
                         drop(requested_blocks);
 
-                        // check POW here. If POW does not pass, discard the block at this
-                        // stage
-                        let pow_check = validation::check_pow_sortition_id(&block, &self.config);
-                        match pow_check {
-                            BlockResult::Pass => {}
-                            _ => continue,
-                        }
-
                         // check whether the block is being processed. note that here we use lock
                         // to make sure that the hash either in recent_blocks, or blockdb, so we
                         // don't have a single duplicate
@@ -221,9 +222,9 @@ impl Context {
                         hashes.push(hash);
                     }
 
-                    for block in &blocks {
-                        PERFORMANCE_COUNTER.record_receive_block(&block);
-                    }
+                    // for block in &blocks {
+                    //     PERFORMANCE_COUNTER.record_receive_block(&block);
+                    // }
 
                     // tell peers about the new blocks
                     // TODO: we will do this only in a reasonable network topology
@@ -260,34 +261,6 @@ impl Context {
                             _ => unreachable!(),
                         }
 
-                        // check sortition proof and content semantics
-                        let sortition_proof =
-                            validation::check_sortition_proof(&block, &self.config);
-                        match sortition_proof {
-                            BlockResult::Pass => {}
-                            _ => {
-                                warn!(
-                                    "Ignoring invalid block {:.8}: {}",
-                                    block.hash(),
-                                    sortition_proof
-                                );
-                                continue;
-                            }
-                        }
-                        let content_semantic =
-                            validation::check_content_semantic(&block, &self.chain, &self.blockdb);
-                        match content_semantic {
-                            BlockResult::Pass => {}
-                            _ => {
-                                warn!(
-                                    "Ignoring invalid block {:.8}: {}",
-                                    block.hash(),
-                                    content_semantic
-                                );
-                                continue;
-                            }
-                        }
-
                         debug!("Processing block {:.8}", block.hash());
                         new_validated_block(
                             &block,
@@ -298,8 +271,7 @@ impl Context {
                         );
                         context_update_sig.push(match &block.content {
                             Content::Proposer(_) => ContextUpdateSignal::NewProposerBlock,
-                            Content::Voter(c) => ContextUpdateSignal::NewVoterBlock(c.chain_number),
-                            Content::Transaction(_) => ContextUpdateSignal::NewTransactionBlock,
+                            Content::Voter(_) => ContextUpdateSignal::NewVoterBlock,
                         });
                         let mut buffer = self.buffer.lock().unwrap();
                         let mut resolved_by_current = buffer.satisfy(block.hash());

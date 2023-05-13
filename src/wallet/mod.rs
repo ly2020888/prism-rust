@@ -1,6 +1,6 @@
 extern crate ed25519_dalek;
 extern crate rand;
-use crate::crypto::hash::Hashable;
+use crate::crypto::hash::{Hashable, H256};
 use crate::transaction::{Account, Address, Authorization, Transaction};
 use ed25519_dalek::Keypair;
 use ed25519_dalek::{SignatureError, Signer};
@@ -35,7 +35,7 @@ impl From<SignatureError> for WalletError {
 
 impl fmt::Display for WalletError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
+        match self {
             WalletError::InsufficientBalance => write!(f, "insufficient balance"),
             WalletError::MissingKeyPair => write!(f, "missing key pair for the requested address"),
             WalletError::SignError(x) => write!(f, "{}", &x),
@@ -49,6 +49,9 @@ impl Wallet {
             account,
             keypair: None,
         }
+    }
+    pub fn address(&self) -> H256 {
+        self.account.address
     }
 
     pub fn number_of_coins(&self) -> u64 {
@@ -68,7 +71,7 @@ impl Wallet {
     }
 
     /// Create a transaction using the wallet coins
-    pub fn create_transaction(&self, recipient: Address, value: u64) -> Result<Transaction> {
+    pub fn create_transaction(&mut self, recipient: Address, value: u64) -> Result<Transaction> {
         if self.account.balance < value {
             // we don't have enough money in wallet
             return Err(WalletError::InsufficientBalance);
@@ -87,7 +90,7 @@ impl Wallet {
         raw_transaction.hash = Some(raw_transaction.hash());
 
         let raw = bincode::serialize(&raw_transaction).unwrap();
-        let kp = self.keypair.unwrap();
+        let kp = self.keypair.as_mut().unwrap();
         let aut = Authorization {
             pubkey: kp.public.to_bytes().to_vec(),
             signature: kp.try_sign(&raw)?.to_bytes().to_vec(),

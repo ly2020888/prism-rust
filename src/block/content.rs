@@ -2,7 +2,7 @@ use super::Block;
 use super::Content as BlockContent;
 use crate::crypto::hash::{Hashable, H256};
 use crate::crypto::merkle::MerkleTree;
-use crate::experiment::performance_counter::PayloadSize;
+//use crate::experiment::performance_counter::PayloadSize;
 use crate::transaction::Transaction;
 
 /// The content of a voter block.
@@ -18,6 +18,10 @@ pub struct Content {
 
     /// 普通区块的引用
     pub refs: Vec<H256>,
+
+    pub weight: u64,
+
+    pub height: u64,
 }
 
 impl Content {
@@ -27,23 +31,27 @@ impl Content {
         parent: H256,
         transactions: Vec<Transaction>,
         refs: Vec<H256>,
+        weight: u64,
+        height: u64,
     ) -> Self {
         Self {
             chain_number,
             parent,
             transactions,
             refs,
+            weight,
+            height,
         }
     }
 }
 
-impl PayloadSize for Content {
-    fn size(&self) -> usize {
-        std::mem::size_of::<u16>()
-            + std::mem::size_of::<H256>()
-            + self.refs.len() * std::mem::size_of::<H256>()
-    }
-}
+// impl PayloadSize for Content {
+//     fn size(&self) -> usize {
+//         std::mem::size_of::<u16>()
+//             + std::mem::size_of::<H256>()
+//             + self.refs.len() * std::mem::size_of::<H256>()
+//     }
+// }
 
 impl Hashable for Content {
     fn hash(&self) -> H256 {
@@ -65,6 +73,8 @@ pub fn voter_genesis(chain_num: u16) -> Block {
         parent: all_zero.into(),
         transactions: vec![],
         refs: vec![],
+        weight: 0,
+        height: 0,
     };
     // TODO: this block will definitely not pass validation. We depend on the fact that genesis
     // blocks are added to the system at initialization. Seems like a moderate hack.
@@ -85,6 +95,8 @@ pub fn proposer_genesis(chain_num: u16) -> Block {
         parent: all_zero.into(),
         transactions: vec![],
         refs: vec![],
+        weight: 0,
+        height: 0,
     };
     // TODO: this block will definitely not pass validation. We depend on the fact that genesis
     // blocks are added to the system at initialization. Seems like a moderate hack.

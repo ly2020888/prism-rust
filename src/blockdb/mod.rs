@@ -1,5 +1,5 @@
-use crate::block::proposer::genesis as proposer_genesis;
-use crate::block::content::genesis as voter_genesis;
+use crate::block::content::proposer_genesis;
+use crate::block::content::voter_genesis;
 use crate::block::Block;
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};
@@ -64,7 +64,7 @@ impl BlockDatabase {
         db.db.put_cf(
             block_cf,
             &config.proposer_genesis,
-            &serialize(&proposer_genesis()).unwrap(),
+            &serialize(&proposer_genesis(0)).unwrap(),
         )?;
         db.db.put_cf(
             block_arrival_order_cf,
@@ -79,7 +79,7 @@ impl BlockDatabase {
         counter += 1;
 
         // insert voter genesis blocks
-        for i in 0..config.voter_chains {
+        for i in 1..=config.voter_chains {
             db.db.put_cf(
                 block_cf,
                 &config.voter_genesis[i as usize],

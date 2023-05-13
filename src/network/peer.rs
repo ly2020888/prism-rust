@@ -1,13 +1,14 @@
 use super::message;
-use futures::{channel::mpsc, sink::SinkExt};
-use log::trace;
-use smol::Async;
 
-pub fn new(
-    stream: &Async<std::net::TcpStream>,
-) -> std::io::Result<(mpsc::UnboundedReceiver<Vec<u8>>, Handle)> {
-    let (write_sender, write_receiver) = mpsc::unbounded(); // TODO: think about the buffer size here
-    let addr = stream.get_ref().peer_addr()?;
+use log::trace;
+use tokio::net::TcpStream;
+use tokio::runtime;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedReceiver;
+
+pub fn new(stream: &TcpStream) -> std::io::Result<(UnboundedReceiver<Vec<u8>>, Handle)> {
+    let (write_sender, write_receiver) = mpsc::unbounded_channel(); // TODO: think about the buffer size here
+    let addr = stream.peer_addr()?;
     let handle = Handle {
         write_queue: write_sender,
         addr,
@@ -30,9 +31,10 @@ pub struct Handle {
 impl Handle {
     pub fn write(&mut self, msg: message::Message) {
         // TODO: return result
+        let rt = runtime::Runtime::new().unwrap();
         let buffer = bincode::serialize(&msg).unwrap();
-        futures::executor::block_on(async move {
-            if self.write_queue.send(buffer).await.is_err() {
+        rt.block_on(async move {
+            if self.write_queue.send(buffer).is_err() {
                 trace!("Trying to send to disconnected peer");
             }
         });

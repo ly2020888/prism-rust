@@ -1,7 +1,6 @@
 use crate::crypto::hash::{Hashable, H256};
-// TODO: Add the address of the miner
-
 /// The header of a block.
+
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, Copy)]
 pub struct Header {
     /// Hash of the parent voter block.
