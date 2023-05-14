@@ -127,76 +127,22 @@ impl BlockChain {
         // insert genesis blocks
         let mut wb = WriteBatch::default();
 
-        // proposer genesis block
-        wb.put_cf(
-            proposer_node_level_cf,
-            serialize(&db.config.proposer_genesis).unwrap(),
-            serialize(&(0 as u64)).unwrap(),
-        );
-        wb.merge_cf(
-            proposer_tree_level_cf,
-            serialize(&(0 as u64)).unwrap(),
-            serialize(&db.config.proposer_genesis).unwrap(),
-        );
-
-        wb.put_cf(
-            proposer_leader_sequence_cf,
-            serialize(&(0 as u64)).unwrap(),
-            serialize(&db.config.proposer_genesis).unwrap(),
-        );
-        let proposer_genesis_ledger: Vec<H256> = vec![db.config.proposer_genesis];
-        wb.put_cf(
-            proposer_ledger_order_cf,
-            serialize(&(0 as u64)).unwrap(),
-            serialize(&proposer_genesis_ledger).unwrap(),
-        );
-        wb.put_cf(
-            proposer_ref_neighbor_cf,
-            serialize(&db.config.proposer_genesis).unwrap(),
-            serialize(&Vec::<H256>::new()).unwrap(),
-        );
-        wb.put_cf(
-            transaction_ref_neighbor_cf,
-            serialize(&db.config.proposer_genesis).unwrap(),
-            serialize(&Vec::<H256>::new()).unwrap(),
-        );
-
         // voter genesis blocks
         let mut voter_ledger_tips = db.voter_ledger_tips.lock().unwrap();
         for chain_num in 0..db.config.voter_chains {
             wb.put_cf(
-                parent_neighbor_cf,
-                serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
-                serialize(&db.config.proposer_genesis).unwrap(),
-            );
-            wb.merge_cf(
-                vote_neighbor_cf,
-                serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
-                serialize(&db.config.proposer_genesis).unwrap(),
-            );
-            wb.merge_cf(
-                proposer_vote_count_cf,
-                serialize(&db.config.proposer_genesis).unwrap(),
-                serialize(&(1 as u64)).unwrap(),
-            );
-            wb.merge_cf(
-                proposer_node_vote_cf,
-                serialize(&db.config.proposer_genesis).unwrap(),
-                serialize(&(true, chain_num as u16, 0 as u64)).unwrap(),
-            );
-            wb.put_cf(
                 voter_node_level_cf,
-                serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
+                serialize(&db.config.genesis_hashes[chain_num as usize]).unwrap(),
                 serialize(&(0 as u64)).unwrap(),
             );
             wb.put_cf(
                 voter_node_voted_level_cf,
-                serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
+                serialize(&db.config.genesis_hashes[chain_num as usize]).unwrap(),
                 serialize(&(0 as u64)).unwrap(),
             );
             wb.put_cf(
                 voter_node_chain_cf,
-                serialize(&db.config.voter_genesis[chain_num as usize]).unwrap(),
+                serialize(&db.config.genesis_hashes[chain_num as usize]).unwrap(),
                 serialize(&(chain_num as u16)).unwrap(),
             );
             wb.merge_cf(
@@ -205,7 +151,7 @@ impl BlockChain {
                 serialize(&(1 as u64)).unwrap(),
             );
 
-            voter_ledger_tips[chain_num as usize] = db.config.voter_genesis[chain_num as usize];
+            voter_ledger_tips[chain_num as usize] = db.config.genesis_hashes[chain_num as usize];
         }
         drop(voter_ledger_tips);
         db.db.write(wb)?;

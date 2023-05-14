@@ -69,8 +69,8 @@ impl BalanceDatabase {
         // field in inputs are correct, and whether all owners have signed the transaction
 
         for t in transactions {
-            let mut input_account: Address = t.input_account.clone();
-            let mut output_acccount: Address = t.output_acccount.clone();
+            let input_account: Address = t.input_account.clone();
+            let output_acccount: Address = t.output_acccount.clone();
             let a_id_ser = serialize(&input_account).unwrap();
             let b_id_ser = serialize(&output_acccount).unwrap();
             let mut account_a: Account;

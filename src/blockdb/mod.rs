@@ -60,39 +60,22 @@ impl BlockDatabase {
         let block_sequence_number_cf = db.db.cf_handle(BLOCK_SEQUENCE_NUMBER_CF).unwrap();
 
         let mut counter: u64 = 0;
-        // insert proposer genesis block
-        db.db.put_cf(
-            block_cf,
-            &config.proposer_genesis,
-            &serialize(&proposer_genesis(0)).unwrap(),
-        )?;
-        db.db.put_cf(
-            block_arrival_order_cf,
-            &counter.to_ne_bytes(),
-            &config.proposer_genesis,
-        )?;
-        db.db.put_cf(
-            block_sequence_number_cf,
-            &config.proposer_genesis,
-            &counter.to_ne_bytes(),
-        )?;
-        counter += 1;
 
         // insert voter genesis blocks
         for i in 1..=config.voter_chains {
             db.db.put_cf(
                 block_cf,
-                &config.voter_genesis[i as usize],
+                &config.genesis_hashes[i as usize],
                 &serialize(&voter_genesis(i as u16)).unwrap(),
             )?;
             db.db.put_cf(
                 block_arrival_order_cf,
                 &counter.to_ne_bytes(),
-                &config.voter_genesis[i as usize],
+                &config.genesis_hashes[i as usize],
             )?;
             db.db.put_cf(
                 block_sequence_number_cf,
-                &config.voter_genesis[i as usize],
+                &config.genesis_hashes[i as usize],
                 &counter.to_ne_bytes(),
             )?;
             counter += 1;

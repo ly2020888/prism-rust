@@ -21,4 +21,5 @@ pub mod network;
 pub mod transaction;
 pub mod validation;
 //pub mod visualization;
+pub mod cmd;
 pub mod wallet;

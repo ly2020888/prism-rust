@@ -58,7 +58,6 @@ pub struct Context {
     context_update_chan: Receiver<ContextUpdateSignal>,
     context_update_tx: Sender<ContextUpdateSignal>,
     server: ServerHandle,
-    header: Header,
     config: BlockchainConfig,
 }
 
@@ -87,12 +86,6 @@ pub fn new(
         context_update_chan: ctx_update_source,
         context_update_tx: ctx_update_tx.clone(),
         server: server.clone(),
-        header: Header {
-            parent: config.proposer_genesis,
-            timestamp: get_time(),
-            nonce: 0,
-            content_merkle_root: H256::default(),
-        },
 
         config,
     };

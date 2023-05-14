@@ -148,7 +148,7 @@ impl Context {
                 {
                     Ok(_) => {
                         let new_payload: Vec<u8> = msg_buffer[0..msg_size as usize].to_vec();
-                        new_msg_chan.send((new_payload, handle_copy.clone())).await;
+                        let _ = new_msg_chan.send((new_payload, handle_copy.clone())).await;
                     }
                     Err(_) => {
                         break;
@@ -189,7 +189,7 @@ impl Context {
                 }
             }
             // the peer is disconnected
-            control_chan.send(ControlSignal::DroppedPeer(addr)).await;
+            let _ = control_chan.send(ControlSignal::DroppedPeer(addr)).await;
         });
 
         // second, start a task that keeps writing to this guy

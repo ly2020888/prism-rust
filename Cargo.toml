@@ -2,7 +2,7 @@
 name = "prism"
 version = "0.1.0"
 authors = []
-edition = "2018"
+edition = "2021"
 
 [profile.release]
 debug = true
@@ -32,6 +32,8 @@ base64 = "0.21.0"
 crossbeam = "0.8.2"
 statrs = "0.16.0"
 tokio = { version = "1.28.1", features = ["full"] }
+
+
 [dependencies.ed25519-dalek]
 version = "1.0.1"
 default-features = false
@@ -39,4 +41,4 @@ features = ["u64_backend", "std", "batch"]
 
 [dependencies.clap]
 version = "4.2.7"
-features = [ "wrap_help" ]
+features = ["wrap_help", "derive"]
