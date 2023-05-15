@@ -43,7 +43,7 @@ enum State {
 }
 
 pub struct TransactionGenerator {
-    wallet: Arc<Wallet>,
+    wallets: Vec<Wallet>,
     server: ServerHandle,
     mempool: Arc<Mutex<MemoryPool>>,
     control_chan: channel::Receiver<ControlSignal>,
@@ -54,19 +54,19 @@ pub struct TransactionGenerator {
 
 impl TransactionGenerator {
     pub fn new(
-        wallet: &Arc<Wallet>,
+        wallets: Vec<Wallet>,
         server: &ServerHandle,
         mempool: &Arc<Mutex<MemoryPool>>,
     ) -> (Self, channel::Sender<ControlSignal>) {
         let (tx, rx) = channel::unbounded();
         let instance = Self {
-            wallet: Arc::clone(wallet),
+            wallets,
             server: server.clone(),
             mempool: Arc::clone(mempool),
             control_chan: rx,
             arrival_distribution: ArrivalDistribution::Uniform(UniformArrival { interval: 100 }),
             value_distribution: ValueDistribution::Uniform(UniformValue { min: 50, max: 100 }),
-            state: State::Paused,
+            state: State::Continuous(10000),
         };
         (instance, tx)
     }
@@ -101,9 +101,14 @@ impl TransactionGenerator {
         thread::spawn(move || {
             let mut rng = rand::thread_rng();
             // TODO: make it flexible
-            let addr = self.wallet.addresses().unwrap()[0];
-            let mut prev_coin = None;
             loop {
+                let addr_input = rng.gen_range(0, self.wallets.len());
+                let addr_output = rng.gen_range(0, self.wallets.len());
+                if addr_input == addr_output {
+                    continue;
+                }
+                let addr_output = self.wallets[addr_output].address();
+
                 let tx_gen_start = time::Instant::now();
                 // check the current state and try to receive control message
                 match self.state {
@@ -145,11 +150,10 @@ impl TransactionGenerator {
                         }
                     }
                 };
-                let transaction = self.wallet.create_transaction(addr, value, prev_coin);
-                PERFORMANCE_COUNTER.record_generate_transaction(&transaction);
+                let transaction = self.wallets[addr_input].create_transaction(addr_output, value);
+                // PERFORMANCE_COUNTER.record_generate_transaction(&transaction);
                 match transaction {
                     Ok(t) => {
-                        prev_coin = Some(t.input.last().unwrap().coin);
                         new_transaction(t, &self.mempool, &self.server);
                         // if we are in stepping mode, decrease the step count
                         if let State::Step(step_count) = self.state {
@@ -162,7 +166,6 @@ impl TransactionGenerator {
                     }
                     Err(e) => {
                         trace!("Failed to generate transaction: {}", e);
-                        prev_coin = None;
                     }
                 };
                 let interval: u64 = match &self.arrival_distribution {

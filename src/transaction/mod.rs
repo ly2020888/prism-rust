@@ -6,7 +6,7 @@ use std::time::SystemTime;
 pub type Address = H256;
 
 /// 现在重构为账户模型
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Account {
     pub address: Address,
     pub balance: u64,

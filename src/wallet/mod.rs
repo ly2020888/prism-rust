@@ -13,6 +13,7 @@ pub const KEYPAIR_CF: &str = "KEYPAIR"; // &Address to &KeyPairPKCS8
 pub type Result<T> = std::result::Result<T, WalletError>;
 
 /// A data structure to maintain key pairs and their coins, and to generate transactions.
+#[derive(Debug)]
 pub struct Wallet {
     /// The underlying RocksDB handle.
     account: Account,
@@ -49,6 +50,10 @@ impl Wallet {
             account,
             keypair: None,
         }
+    }
+
+    pub fn get_keypair(&self) -> Vec<u8> {
+        self.keypair.as_ref().unwrap().to_bytes().to_vec()
     }
     pub fn address(&self) -> H256 {
         self.account.address

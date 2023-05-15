@@ -32,7 +32,8 @@ base64 = "0.21.0"
 crossbeam = "0.8.2"
 statrs = "0.16.0"
 tokio = { version = "1.28.1", features = ["full"] }
-
+tracing = "0.1.37"
+tracing-subscriber = "0.2.0"
 
 [dependencies.ed25519-dalek]
 version = "1.0.1"
