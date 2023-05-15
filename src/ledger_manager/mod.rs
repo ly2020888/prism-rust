@@ -2,10 +2,10 @@ use crate::block::Content;
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
 use crate::crypto::hash::{Hashable, H256};
-use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
+// use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 
-use crate::transaction::{CoinId, Output, Transaction};
-use crate::utxodb::UtxoDatabase;
+use crate::balancedb::BalanceDatabase;
+use crate::transaction::Transaction;
 use crate::wallet::Wallet;
 use crossbeam::channel;
 use std::collections::{HashMap, HashSet};
@@ -15,7 +15,7 @@ use std::thread;
 pub struct LedgerManager {
     blockdb: Arc<BlockDatabase>,
     chain: Arc<BlockChain>,
-    utxodb: Arc<UtxoDatabase>,
+    balancedb: Arc<BalanceDatabase>,
     wallet: Arc<Wallet>,
 }
 
@@ -23,13 +23,13 @@ impl LedgerManager {
     pub fn new(
         blockdb: &Arc<BlockDatabase>,
         chain: &Arc<BlockChain>,
-        utxodb: &Arc<UtxoDatabase>,
+        balancedb: &Arc<BalanceDatabase>,
         wallet: &Arc<Wallet>,
     ) -> Self {
         Self {
             blockdb: Arc::clone(&blockdb),
             chain: Arc::clone(&chain),
-            utxodb: Arc::clone(&utxodb),
+            balancedb: Arc::clone(&balancedb),
             wallet: Arc::clone(&wallet),
         }
     }
@@ -45,7 +45,7 @@ impl LedgerManager {
         });
 
         // start thread that dispatches jobs to utxo manager
-        let _utxodb = Arc::clone(&self.utxodb);
+        let _utxodb = Arc::clone(&self.balancedb);
         // Scoreboard notes the transaction ID of the coins that is being looked up, may be added,
         // or may be deleted. Before dispatching a transaction, we first check whether the input
         // and output are used by transactions being processed. If no, we will dispatch this

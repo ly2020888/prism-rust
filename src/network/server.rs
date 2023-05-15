@@ -59,7 +59,7 @@ impl Context {
 
         loop {
             let (stream, addr) = listener.accept().await?;
-            control_chan.send(ControlSignal::GetNewPeer(stream)).await;
+            let _ = control_chan.send(ControlSignal::GetNewPeer(stream)).await;
             info!("Incoming peer from {}", addr);
         }
     }
@@ -96,6 +96,13 @@ impl Context {
     /// Connect to a peer, and register this peer
     async fn connect(&mut self, addr: &std::net::SocketAddr) -> std::io::Result<peer::Handle> {
         debug!("Establishing connection to peer {}", addr);
+
+        if self.peers.contains_key(addr) {
+            debug!("existed connection {}", addr);
+            let handle = self.peers.get(addr).unwrap().clone();
+            return Ok(handle);
+        }
+
         let stream = TcpStream::connect(addr).await?;
         // register the new peer
         self.register(stream, peer::Direction::Outgoing).await
@@ -103,7 +110,6 @@ impl Context {
 
     async fn accept(&mut self, stream: TcpStream) -> std::io::Result<()> {
         self.register(stream, peer::Direction::Incoming).await?;
-
         Ok(())
     }
 

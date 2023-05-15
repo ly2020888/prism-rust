@@ -1,3 +1,4 @@
+/// ! 共识层
 use crate::block::{Block, Content};
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};

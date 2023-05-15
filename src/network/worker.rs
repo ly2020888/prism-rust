@@ -13,7 +13,6 @@ use crate::miner::memory_pool::MemoryPool;
 use crate::miner::ContextUpdateSignal;
 use crate::network::server::Handle as ServerHandle;
 use crate::validation::{self, BlockResult};
-use crate::wallet::Wallet;
 use crossbeam::channel;
 use log::{debug, warn};
 use std::collections::HashSet;
@@ -27,11 +26,10 @@ type MsgChan = Arc<Mutex<Receiver<(Vec<u8>, peer::Handle)>>>;
 #[derive(Clone)]
 pub struct Context {
     msg_chan: MsgChan,
-    num_worker: usize,
+    num_worker: u64,
     chain: Arc<BlockChain>,
     blockdb: Arc<BlockDatabase>,
     balancedb: Arc<BalanceDatabase>,
-    wallet: Arc<Wallet>,
     mempool: Arc<Mutex<MemoryPool>>,
     context_update_chan: channel::Sender<ContextUpdateSignal>,
     server: ServerHandle,
@@ -42,24 +40,22 @@ pub struct Context {
 }
 
 pub fn new(
-    num_worker: usize,
-    msg_src: MsgChan,
+    num_worker: u64,
+    msg_src: Receiver<(Vec<u8>, peer::Handle)>,
     blockchain: &Arc<BlockChain>,
     blockdb: &Arc<BlockDatabase>,
     balancedb: &Arc<BalanceDatabase>,
-    wallet: &Arc<Wallet>,
     mempool: &Arc<Mutex<MemoryPool>>,
     ctx_update_sink: channel::Sender<ContextUpdateSignal>,
     server: &ServerHandle,
     config: BlockchainConfig,
 ) -> Context {
     Context {
-        msg_chan: msg_src,
+        msg_chan: Arc::new(Mutex::new(msg_src)),
         num_worker,
         chain: Arc::clone(blockchain),
         blockdb: Arc::clone(blockdb),
         balancedb: Arc::clone(balancedb),
-        wallet: Arc::clone(wallet),
         mempool: Arc::clone(mempool),
         context_update_chan: ctx_update_sink,
         server: server.clone(),
@@ -88,7 +84,8 @@ impl Context {
 
             let msg = rt
                 .block_on(async {
-                    let mut msg_chan = self.msg_chan.lock().unwrap();
+                    let msg_chan = Arc::clone(&self.msg_chan);
+                    let mut msg_chan = msg_chan.lock().unwrap();
                     msg_chan.recv().await
                 })
                 .unwrap();

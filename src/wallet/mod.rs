@@ -58,6 +58,10 @@ impl Wallet {
         self.account.balance
     }
 
+    /// 返回是否存在keypair
+    pub fn has(&self) -> bool {
+        self.keypair.is_some()
+    }
     /// Generate a new key pair
 
     pub fn generate_keypair(&mut self) {
