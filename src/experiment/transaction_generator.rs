@@ -5,11 +5,11 @@ use crate::network::server::Handle as ServerHandle;
 
 use crate::wallet::Wallet;
 use crossbeam::channel;
-use log::{info, trace};
 use rand::Rng;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time;
+use tracing::{debug, error, info};
 
 pub enum ControlSignal {
     Start(u64),
@@ -97,7 +97,7 @@ impl TransactionGenerator {
         }
     }
 
-    pub fn start(mut self) {
+    pub fn start(mut self) -> JoinHandle<()> {
         thread::spawn(move || {
             let mut rng = rand::thread_rng();
             // TODO: make it flexible
@@ -131,7 +131,8 @@ impl TransactionGenerator {
                 }
                 // check whether the mempool is already full
                 if let State::Continuous(throttle) = self.state {
-                    if self.mempool.lock().unwrap().len() as u64 >= throttle {
+                    let size = { self.mempool.lock().unwrap().len() };
+                    if size as u64 >= throttle {
                         // if the mempool is full, just skip this transaction
                         let interval: u64 = match &self.arrival_distribution {
                             ArrivalDistribution::Uniform(d) => d.interval,
@@ -165,7 +166,7 @@ impl TransactionGenerator {
                         }
                     }
                     Err(e) => {
-                        trace!("Failed to generate transaction: {}", e);
+                        error!("Failed to generate transaction: {}", e);
                     }
                 };
                 let interval: u64 = match &self.arrival_distribution {
@@ -182,7 +183,59 @@ impl TransactionGenerator {
                 };
                 thread::sleep(interval);
             }
-        });
-        info!("Transaction generator initialized into paused mode");
+        })
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use std::{net::SocketAddr, sync::Arc};
+
+    use tokio::sync::mpsc::{self};
+    use tracing::{debug, Level};
+    use tracing_subscriber::FmtSubscriber;
+
+    use crate::{
+        experiment::transaction_generator, miner::memory_pool::MemoryPool, network::server, wallet,
+    };
+
+    fn init() {
+        // a builder for `FmtSubscriber`.
+        let subscriber = FmtSubscriber::builder()
+            // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+            // will be written to stdout.
+            .with_max_level(Level::TRACE)
+            // completes the builder.
+            .finish();
+
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    }
+
+    #[test]
+    fn test_txgen() {
+        init();
+        let mempool_size = 1_000_000;
+        let mempool = MemoryPool::new(mempool_size);
+        let mempool = Arc::new(std::sync::Mutex::new(mempool));
+        debug!("Initialized mempool, maximum size set to {}", mempool_size);
+
+        // start the p2p server
+        // parse p2p server address
+        let p2p_addr = "127.0.0.1:8079".parse::<SocketAddr>().unwrap();
+
+        // create channels between server and worker, worker and miner, miner and worker
+        let (msg_tx, _msg_rx) = mpsc::channel(100);
+
+        let (server_ctx, server) = server::new(p2p_addr, msg_tx).unwrap();
+        server_ctx.start().unwrap();
+
+        let wallets = wallet::util::load_wallets(1_000_000);
+
+        let (txgen_ctx, _txgen_control_chan) =
+            transaction_generator::TransactionGenerator::new(wallets, &server, &mempool);
+        let handle = txgen_ctx.start();
+
+        handle.join().unwrap();
     }
 }

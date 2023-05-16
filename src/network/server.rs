@@ -1,13 +1,13 @@
 use super::message;
 use super::peer;
 
-use log::{debug, info, trace};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tracing::{debug, error, info, trace};
 pub fn new(
     addr: std::net::SocketAddr,
     msg_sink: Sender<(Vec<u8>, peer::Handle)>,
@@ -37,14 +37,20 @@ pub struct Context {
 
 impl Context {
     /// Start a new server context.
-    pub async fn start(self) -> std::io::Result<()> {
-        tokio::spawn(async move {
-            self.mainloop().await.unwrap();
+    pub fn start(self) -> std::io::Result<()> {
+        let rt: Runtime = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            match self.mainloop() {
+                Err(e) => {
+                    error!("{:?}", e);
+                }
+                Ok(_) => {}
+            }
         });
         Ok(())
     }
 
-    pub async fn mainloop(mut self) -> std::io::Result<()> {
+    pub fn mainloop(mut self) -> std::io::Result<()> {
         // initialize the server socket
         let socket = TcpSocket::new_v4()?;
         socket.bind(self.addr.into())?;
@@ -57,11 +63,14 @@ impl Context {
             self.dispatch_control().await.unwrap();
         });
 
-        loop {
-            let (stream, addr) = listener.accept().await?;
-            let _ = control_chan.send(ControlSignal::GetNewPeer(stream)).await;
-            info!("Incoming peer from {}", addr);
-        }
+        tokio::spawn(async move {
+            loop {
+                let (stream, addr) = listener.accept().await.unwrap();
+                let _ = control_chan.send(ControlSignal::GetNewPeer(stream)).await;
+                info!("Incoming peer from {}", addr);
+            }
+        });
+        Ok(())
     }
 
     async fn dispatch_control(&mut self) -> std::io::Result<()> {

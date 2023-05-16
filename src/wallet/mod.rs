@@ -1,3 +1,5 @@
+pub mod util;
+
 extern crate ed25519_dalek;
 extern crate rand;
 use crate::crypto::hash::{Hashable, H256};
@@ -7,7 +9,7 @@ use ed25519_dalek::{SignatureError, Signer};
 use rand::rngs::OsRng;
 use std::fmt;
 use std::time::SystemTime;
-
+pub use util::*;
 pub const KEYPAIR_CF: &str = "KEYPAIR"; // &Address to &KeyPairPKCS8
 
 pub type Result<T> = std::result::Result<T, WalletError>;

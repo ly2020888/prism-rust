@@ -97,6 +97,3 @@ impl MemoryPool {
         self.by_hash.len()
     }
 }
-
-#[cfg(test)]
-pub mod tests {}
