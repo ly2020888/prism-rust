@@ -28,5 +28,5 @@ pub fn new_validated_block(
     }
 
     // insert the new block into the blockchain
-    chain.insert_block(&block).unwrap();
+    chain.concensus(&block).unwrap();
 }

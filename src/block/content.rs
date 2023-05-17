@@ -9,7 +9,7 @@ use crate::transaction::Transaction;
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct Content {
     /// ID of the voter chain this block is attaching to.
-    pub chain_number: u16,
+    pub chain_id: u16,
     /// Hash of the parent voter block.
     pub parent: H256,
 
@@ -19,7 +19,7 @@ pub struct Content {
     /// 普通区块的引用
     pub refs: Vec<H256>,
 
-    pub weight: u64,
+    pub weight: u32,
 
     pub height: u64,
 }
@@ -27,15 +27,15 @@ pub struct Content {
 impl Content {
     /// Create new voter block content.
     pub fn new(
-        chain_number: u16,
+        chain_id: u16,
         parent: H256,
         transactions: Vec<Transaction>,
         refs: Vec<H256>,
-        weight: u64,
+        weight: u32,
         height: u64,
     ) -> Self {
         Self {
-            chain_number,
+            chain_id,
             parent,
             transactions,
             refs,
@@ -58,7 +58,7 @@ impl Hashable for Content {
         // TODO: we are hashing in a merkle tree. why do we need so?
         let merkle_tree = MerkleTree::new(&self.refs);
         let mut bytes = [0u8; 66];
-        bytes[..2].copy_from_slice(&self.chain_number.to_be_bytes());
+        bytes[..2].copy_from_slice(&self.chain_id.to_be_bytes());
         bytes[2..34].copy_from_slice(self.parent.as_ref());
         bytes[34..66].copy_from_slice(merkle_tree.root().as_ref());
         ring::digest::digest(&ring::digest::SHA256, &bytes).into()
@@ -69,7 +69,7 @@ impl Hashable for Content {
 pub fn voter_genesis(chain_num: u16) -> Block {
     let all_zero: [u8; 32] = [0; 32];
     let content = Content {
-        chain_number: chain_num,
+        chain_id: chain_num,
         parent: all_zero.into(),
         transactions: vec![],
         refs: vec![],
@@ -91,7 +91,7 @@ pub fn voter_genesis(chain_num: u16) -> Block {
 pub fn proposer_genesis(chain_num: u16) -> Block {
     let all_zero: [u8; 32] = [0; 32];
     let content = Content {
-        chain_number: chain_num,
+        chain_id: chain_num,
         parent: all_zero.into(),
         transactions: vec![],
         refs: vec![],

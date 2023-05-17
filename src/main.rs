@@ -33,6 +33,7 @@ use std::time;
 use std::{convert::TryInto, net::SocketAddr};
 
 use tracing::{debug, error, info};
+
 #[tokio::main]
 async fn main() {
     // parse command line arguments
@@ -45,8 +46,17 @@ async fn main() {
     let block_size: u32 = cli.block_size;
     let comfirm: u32 = cli.confirm_confidence;
     let block_rate = cli.block_rate;
-    let config =
-        BlockchainConfig::new(voter_chains, block_size, tx_throughput, block_rate, comfirm);
+    let p2p_id = cli.p2p_id;
+    let block_weight = cli.block_weight;
+    let config = BlockchainConfig::new(
+        voter_chains,
+        block_size,
+        tx_throughput,
+        block_rate,
+        comfirm,
+        p2p_id,
+        block_weight,
+    );
     info!("block rate set to {} blks/s", config.block_rate);
 
     info!("Transaction rate set to {} tps", config.tx_throughput);
@@ -86,7 +96,7 @@ async fn main() {
 
     // start the p2p server
     let (server_ctx, server) = server::new(p2p_addr, msg_tx).unwrap();
-    server_ctx.start().await.unwrap();
+    server_ctx.start().unwrap();
 
     // start the worker
     let p2p_workers = cli.p2p_workers;
@@ -122,7 +132,7 @@ async fn main() {
     connect_known_peers(known_peers, server.clone());
 
     // fund the given addresses
-    let wallets = wallet::util::load_wallets();
+    let wallets = wallet::util::load_wallets(cli.fund_value);
 
     // start the transaction generator
     // txgen_control_chan 交易控制通道，暂时用不到

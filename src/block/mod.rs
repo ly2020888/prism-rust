@@ -19,21 +19,17 @@ impl Block {
     pub fn new(
         parent: H256,
         timestamp: u128,
-        nonce: u32,
+        chain_id: u16,
         content_merkle_root: H256,
         content: Content,
     ) -> Self {
-        let header = Header::new(parent, timestamp, nonce, content_merkle_root);
+        let header = Header::new(parent, timestamp, chain_id, content_merkle_root);
         Self { header, content }
     }
 
     // TODO: use another name
     /// Create a new block from header.
-    pub fn from_header(
-        header: header::Header,
-        content: Content,
-        sortition_proof: Vec<H256>,
-    ) -> Self {
+    pub fn from_header(header: header::Header, content: Content) -> Self {
         Self { header, content }
     }
 }
@@ -90,25 +86,25 @@ pub mod tests {
     macro_rules! random_nonce {
         () => {{
             let mut rng = rand::thread_rng();
-            let random_u32: u32 = rng.gen();
-            random_u32
+            let random_u16: u16 = rng.gen();
+            random_u16
         }};
     }
 
     pub fn proposer_block(
         parent: H256,
         timestamp: u128,
-        chain_number: u16,
         refs: Vec<H256>,
         transactions: Vec<Transaction>,
-        weight: u64,
+        chain_id: u16,
+        weight: u32,
         height: u64,
     ) -> Block {
         let content = Content::Proposer(content::Content {
             refs,
             transactions,
             parent,
-            chain_number,
+            chain_id,
             weight,
             height,
         });
@@ -119,17 +115,17 @@ pub mod tests {
     pub fn voter_block(
         parent: H256,
         timestamp: u128,
-        chain_number: u16,
         refs: Vec<H256>,
         transactions: Vec<Transaction>,
-        weight: u64,
+        chain_id: u16,
+        weight: u32,
         height: u64,
     ) -> Block {
         let content = Content::Voter(content::Content {
             refs,
             transactions,
             parent,
-            chain_number,
+            chain_id,
             weight,
             height,
         });

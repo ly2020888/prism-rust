@@ -6,12 +6,13 @@ use crate::crypto::hash::{Hashable, H256};
 //use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 use bincode::{deserialize, serialize};
 use log::{debug, info, warn};
+use rand::Rng;
 use rocksdb::{ColumnFamilyDescriptor, MergeOperands, Options, WriteBatch, DB};
 use statrs::distribution::{Discrete, Poisson};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use std::ops::Range;
+use std::ops::{DerefMut, Range};
 use std::sync::Mutex;
 
 // Column family names for node/chain metadata
@@ -160,7 +161,7 @@ impl BlockChain {
         Ok(db)
     }
 
-    pub fn insert_block(&self, block: &Block) -> Result<()> {
+    pub fn concensus(&self, block: &Block) -> Result<()> {
         // get cf handles
         let proposer_node_level_cf = self.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
         let voter_node_level_cf = self.db.cf_handle(VOTER_NODE_LEVEL_CF).unwrap();
@@ -301,102 +302,42 @@ impl BlockChain {
         Ok(())
     }
 
-    pub fn unreferred_proposers(&self) -> Vec<H256> {
-        // TODO: does ordering matter?
-        // TODO: should remove the parent block when mining
-        let unreferred_proposers = self.unreferred_proposers.lock().unwrap();
-        let list: Vec<H256> = unreferred_proposers.iter().cloned().collect();
-        drop(unreferred_proposers);
-        list
+    pub fn get_parent_hash(&self, chain_id: usize) -> H256 {
+        assert!(chain_id as u16 <= self.config.voter_chains);
+        let chains_hashs = self.voter_ledger_tips.lock().unwrap();
+        chains_hashs[chain_id]
     }
 
-    /// Get the list of unvoted proposer blocks that a voter chain should vote for, given the tip
-    /// of the particular voter chain.
-    pub fn unvoted_proposer(&self, tip: &H256, proposer_parent: &H256) -> Result<Vec<H256>> {
-        let voter_node_voted_level_cf = self.db.cf_handle(VOTER_NODE_VOTED_LEVEL_CF).unwrap();
-        let proposer_node_level_cf = self.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
-        let proposer_tree_level_cf = self.db.cf_handle(PROPOSER_TREE_LEVEL_CF).unwrap();
-        let proposer_vote_count_cf = self.db.cf_handle(PROPOSER_VOTE_COUNT_CF).unwrap();
-        // get the deepest voted level
-        let first_vote_level: u64 = deserialize(
-            &self
-                .db
-                .get_pinned_cf(voter_node_voted_level_cf, serialize(&tip).unwrap())?
-                .unwrap(),
-        )
-        .unwrap();
+    pub fn get_current_height(&self) -> u64 {
+        let height = self.proposer_ledger_tip.lock().unwrap();
+        let height = height.to_owned();
+        height
+    }
 
-        let last_vote_level: u64 = deserialize(
-            &self
-                .db
-                .get_pinned_cf(proposer_node_level_cf, serialize(&proposer_parent).unwrap())?
-                .unwrap(),
-        )
-        .unwrap();
+    pub fn get_block_ref(&self, chain_id: u16) -> H256 {
+        let mut rng = rand::thread_rng();
+        assert!(chain_id <= self.config.voter_chains);
 
-        // get the block with the most votes on each proposer level
-        // and break ties with hash value
-        let mut list: Vec<H256> = vec![];
-        for level in first_vote_level + 1..=last_vote_level {
-            let mut blocks: Vec<H256> = deserialize(
-                &self
-                    .db
-                    .get_pinned_cf(proposer_tree_level_cf, serialize(&(level as u64)).unwrap())?
-                    .unwrap(),
-            )
-            .unwrap();
-            blocks.sort_unstable();
-            // the current best proposer block to vote for
-            let mut best_vote: Option<(H256, u64)> = None;
-            for block_hash in &blocks {
-                let vote_count: u64 = match &self
-                    .db
-                    .get_pinned_cf(proposer_vote_count_cf, serialize(&block_hash).unwrap())?
-                {
-                    Some(d) => deserialize(d).unwrap(),
-                    None => 0,
-                };
-                match best_vote {
-                    Some((_, num_votes)) => {
-                        if vote_count > num_votes {
-                            best_vote = Some((*block_hash, vote_count));
-                        }
-                    }
-                    None => {
-                        best_vote = Some((*block_hash, vote_count));
-                    }
-                }
+        let rand_ref = loop {
+            let rand_num = rng.gen_range(0, self.config.voter_chains);
+            if rand_num != chain_id {
+                break rand_num;
             }
-            list.push(best_vote.unwrap().0); //Note: the last vote in list could be other proposer that at the same level of proposer_parent
+        };
+        let chains_hashs = self.voter_ledger_tips.lock().unwrap();
+        chains_hashs[rand_ref as usize]
+    }
+
+    /// Check whether the given transaction block exists in the database.
+    pub fn contains_transaction(&self, hash: &H256) -> Result<bool> {
+        let parent_neighbor_cf = self.db.cf_handle(PARENT_NEIGHBOR_CF).unwrap();
+        match self
+            .db
+            .get_pinned_cf(parent_neighbor_cf, serialize(&hash).unwrap())?
+        {
+            Some(_) => Ok(true),
+            None => Ok(false),
         }
-        Ok(list)
-    }
-
-    /// Get the level of the proposer block
-    pub fn proposer_level(&self, hash: &H256) -> Result<u64> {
-        let proposer_node_level_cf = self.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
-        let level: u64 = deserialize(
-            &self
-                .db
-                .get_pinned_cf(proposer_node_level_cf, serialize(&hash).unwrap())?
-                .unwrap(),
-        )
-        .unwrap();
-        Ok(level)
-    }
-
-    /// Get the deepest voted level of a voter
-    pub fn deepest_voted_level(&self, voter: &H256) -> Result<u64> {
-        let voter_node_voted_level_cf = self.db.cf_handle(VOTER_NODE_VOTED_LEVEL_CF).unwrap();
-        // get the deepest voted level
-        let voted_level: u64 = deserialize(
-            &self
-                .db
-                .get_pinned_cf(voter_node_voted_level_cf, serialize(voter).unwrap())?
-                .unwrap(),
-        )
-        .unwrap();
-        Ok(voted_level)
     }
 
     /// Get the chain number of the voter block
@@ -410,62 +351,6 @@ impl BlockChain {
         )
         .unwrap();
         Ok(chain)
-    }
-
-    /// Check whether the given proposer block exists in the database.
-    pub fn contains_proposer(&self, hash: &H256) -> Result<bool> {
-        let proposer_node_level_cf = self.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
-        match self
-            .db
-            .get_pinned_cf(proposer_node_level_cf, serialize(&hash).unwrap())?
-        {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
-    }
-
-    /// Check whether the given voter block exists in the database.
-    pub fn contains_voter(&self, hash: &H256) -> Result<bool> {
-        let voter_node_level_cf = self.db.cf_handle(VOTER_NODE_LEVEL_CF).unwrap();
-        match self
-            .db
-            .get_pinned_cf(voter_node_level_cf, serialize(&hash).unwrap())?
-        {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
-    }
-
-    /// Check whether the given transaction block exists in the database.
-    // TODO: we can't tell whether it's is a transaction block!
-    pub fn contains_transaction(&self, hash: &H256) -> Result<bool> {
-        let parent_neighbor_cf = self.db.cf_handle(PARENT_NEIGHBOR_CF).unwrap();
-        match self
-            .db
-            .get_pinned_cf(parent_neighbor_cf, serialize(&hash).unwrap())?
-        {
-            Some(_) => Ok(true),
-            None => Ok(false),
-        }
-    }
-
-    pub fn proposer_leaders(&self) -> Result<Vec<H256>> {
-        let proposer_leader_sequence_cf = self.db.cf_handle(PROPOSER_LEADER_SEQUENCE_CF).unwrap();
-        let proposer_ledger_tip = self.proposer_ledger_tip.lock().unwrap();
-        let snapshot = self.db.snapshot();
-        let ledger_tip_level = *proposer_ledger_tip;
-        let mut leaders = vec![];
-        drop(proposer_ledger_tip);
-        for level in 0..=ledger_tip_level {
-            match snapshot.get_cf(proposer_leader_sequence_cf, serialize(&level).unwrap())? {
-                Some(d) => {
-                    let hash: H256 = deserialize(&d).unwrap();
-                    leaders.push(hash);
-                }
-                None => unreachable!(),
-            }
-        }
-        Ok(leaders)
     }
 }
 
@@ -534,399 +419,3 @@ fn u64_plus_merge(
     let result: Vec<u8> = serialize(&existing).unwrap();
     Some(result)
 }
-
-/*
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::block::{proposer, transaction, voter, Block, Content};
-    use crate::crypto::hash::H256;
-
-    #[test]
-    fn initialize_new() {
-        let db = BlockChain::new("/tmp/prism_test_blockchain_new.rocksdb").unwrap();
-        // get cf handles
-        let proposer_node_vote_cf = db.db.cf_handle(PROPOSER_NODE_VOTE_CF).unwrap();
-        let proposer_node_level_cf = db.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
-        let voter_node_level_cf = db.db.cf_handle(VOTER_NODE_LEVEL_CF).unwrap();
-        let voter_node_chain_cf = db.db.cf_handle(VOTER_NODE_CHAIN_CF).unwrap();
-        let voter_node_voted_level_cf = db.db.cf_handle(VOTER_NODE_VOTED_LEVEL_CF).unwrap();
-        let proposer_tree_level_cf = db.db.cf_handle(PROPOSER_TREE_LEVEL_CF).unwrap();
-        let parent_neighbor_cf = db.db.cf_handle(PARENT_NEIGHBOR_CF).unwrap();
-        let vote_neighbor_cf = db.db.cf_handle(VOTE_NEIGHBOR_CF).unwrap();
-        let proposer_leader_sequence_cf = db.db.cf_handle(PROPOSER_LEADER_SEQUENCE_CF).unwrap();
-        let proposer_ledger_order_cf = db.db.cf_handle(PROPOSER_LEDGER_ORDER_CF).unwrap();
-
-        // validate proposer genesis
-        let genesis_level: u64 = deserialize(
-            &db.db
-                .get_pinned_cf(
-                    proposer_node_level_cf,
-                    serialize(&(*PROPOSER_GENESIS_HASH)).unwrap(),
-                )
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(genesis_level, 0);
-        let level_0_blocks: Vec<H256> = deserialize(
-            &db.db
-                .get_pinned_cf(proposer_tree_level_cf, serialize(&(0 as u64)).unwrap())
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(level_0_blocks, vec![*PROPOSER_GENESIS_HASH]);
-        let genesis_votes: Vec<(u16, u64)> = deserialize(
-            &db.db
-                .get_pinned_cf(
-                    proposer_node_vote_cf,
-                    serialize(&(*PROPOSER_GENESIS_HASH)).unwrap(),
-                )
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        let mut true_genesis_votes: Vec<(u16, u64)> = vec![];
-        for chain_num in 0..NUM_VOTER_CHAINS {
-            true_genesis_votes.push((chain_num as u16, 0));
-        }
-        assert_eq!(genesis_votes, true_genesis_votes);
-        assert_eq!(*db.proposer_best_level.lock().unwrap(), 0);
-        assert_eq!(*db.unconfirmed_proposers.lock().unwrap(), HashSet::new());
-        assert_eq!(db.unreferred_proposers.lock().unwrap().len(), 1);
-        assert_eq!(
-            db.unreferred_proposers
-                .lock()
-                .unwrap()
-                .contains(&(PROPOSER_GENESIS_HASH)),
-            true
-        );
-        let level_0_leader: H256 = deserialize(
-            &db.db
-                .get_pinned_cf(proposer_leader_sequence_cf, serialize(&(0 as u64)).unwrap())
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(level_0_leader, *PROPOSER_GENESIS_HASH);
-        let level_0_confirms: Vec<H256> = deserialize(
-            &db.db
-                .get_pinned_cf(proposer_ledger_order_cf, serialize(&(0 as u64)).unwrap())
-                .unwrap()
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(level_0_confirms, vec![*PROPOSER_GENESIS_HASH]);
-
-        // validate voter genesis
-        for chain_num in 0..NUM_VOTER_CHAINS {
-            let genesis_level: u64 = deserialize(
-                &db.db
-                    .get_pinned_cf(
-                        voter_node_level_cf,
-                        serialize(&VOTER_GENESIS_HASHES[chain_num as usize]).unwrap(),
-                    )
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(genesis_level, 0);
-            let voted_level: u64 = deserialize(
-                &db.db
-                    .get_pinned_cf(
-                        voter_node_voted_level_cf,
-                        serialize(&VOTER_GENESIS_HASHES[chain_num as usize]).unwrap(),
-                    )
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(voted_level, 0);
-            let genesis_chain: u16 = deserialize(
-                &db.db
-                    .get_pinned_cf(
-                        voter_node_chain_cf,
-                        serialize(&VOTER_GENESIS_HASHES[chain_num as usize]).unwrap(),
-                    )
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(genesis_chain, chain_num as u16);
-            let parent: H256 = deserialize(
-                &db.db
-                    .get_pinned_cf(
-                        parent_neighbor_cf,
-                        serialize(&VOTER_GENESIS_HASHES[chain_num as usize]).unwrap(),
-                    )
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(parent, *PROPOSER_GENESIS_HASH);
-            let voted_proposer: Vec<H256> = deserialize(
-                &db.db
-                    .get_pinned_cf(
-                        vote_neighbor_cf,
-                        serialize(&VOTER_GENESIS_HASHES[chain_num as usize]).unwrap(),
-                    )
-                    .unwrap()
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(voted_proposer, vec![*PROPOSER_GENESIS_HASH]);
-            assert_eq!(
-                *db.voter_best[chain_num as usize].lock().unwrap(),
-                (VOTER_GENESIS_HASHES[chain_num as usize], 0)
-            );
-        }
-    }
-
-    #[test]
-    fn best_proposer_and_voter() {
-        let db =
-            BlockChain::new("/tmp/prism_test_blockchain_best_proposer_and_voter.rocksdb").unwrap();
-        assert_eq!(db.best_proposer().unwrap(), *PROPOSER_GENESIS_HASH);
-        assert_eq!(db.best_voter(0), VOTER_GENESIS_HASHES[0]);
-
-        let new_proposer_content = Content::Proposer(proposer::Content::new(vec![], vec![]));
-        let new_proposer_block = Block::new(
-            *PROPOSER_GENESIS_HASH,
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_proposer_content,
-            [0; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_proposer_block).unwrap();
-        let new_voter_content = Content::Voter(voter::Content::new(
-            0,
-            VOTER_GENESIS_HASHES[0],
-            vec![new_proposer_block.hash()],
-        ));
-        let new_voter_block = Block::new(
-            new_proposer_block.hash(),
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_voter_content,
-            [1; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_voter_block).unwrap();
-        assert_eq!(db.best_proposer().unwrap(), new_proposer_block.hash());
-        assert_eq!(db.best_voter(0), new_voter_block.hash());
-    }
-
-    #[test]
-    fn unreferred_transactions_and_proposer() {
-        let db =
-            BlockChain::new("/tmp/prism_test_blockchain_unreferred_transactions_proposer.rocksdb")
-                .unwrap();
-
-        let new_transaction_content = Content::Transaction(transaction::Content::new(vec![]));
-        let new_transaction_block = Block::new(
-            *PROPOSER_GENESIS_HASH,
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_transaction_content,
-            [0; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_transaction_block).unwrap();
-        assert_eq!(
-            db.unreferred_transactions(),
-            vec![new_transaction_block.hash()]
-        );
-        assert_eq!(db.unreferred_proposers(), vec![*PROPOSER_GENESIS_HASH]);
-
-        let new_proposer_content = Content::Proposer(proposer::Content::new(vec![], vec![]));
-        let new_proposer_block_1 = Block::new(
-            *PROPOSER_GENESIS_HASH,
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_proposer_content,
-            [1; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_proposer_block_1).unwrap();
-        assert_eq!(
-            db.unreferred_transactions(),
-            vec![new_transaction_block.hash()]
-        );
-        assert_eq!(db.unreferred_proposers(), vec![new_proposer_block_1.hash()]);
-
-        let new_proposer_content = Content::Proposer(proposer::Content::new(
-            vec![new_transaction_block.hash()],
-            vec![new_proposer_block_1.hash()],
-        ));
-        let new_proposer_block_2 = Block::new(
-            *PROPOSER_GENESIS_HASH,
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_proposer_content,
-            [2; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_proposer_block_2).unwrap();
-        assert_eq!(db.unreferred_transactions(), vec![]);
-        assert_eq!(db.unreferred_proposers(), vec![new_proposer_block_2.hash()]);
-    }
-
-    #[test]
-    fn unvoted_proposer() {
-        let db = BlockChain::new("/tmp/prism_test_blockchain_unvoted_proposer.rocksdb").unwrap();
-        assert_eq!(
-            db.unvoted_proposer(&VOTER_GENESIS_HASHES[0], &db.best_proposer().unwrap())
-                .unwrap(),
-            vec![]
-        );
-
-        let new_proposer_content = Content::Proposer(proposer::Content::new(vec![], vec![]));
-        let new_proposer_block_1 = Block::new(
-            *PROPOSER_GENESIS_HASH,
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_proposer_content,
-            [0; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_proposer_block_1).unwrap();
-
-        let new_proposer_content = Content::Proposer(proposer::Content::new(vec![], vec![]));
-        let new_proposer_block_2 = Block::new(
-            *PROPOSER_GENESIS_HASH,
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_proposer_content,
-            [1; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_proposer_block_2).unwrap();
-        assert_eq!(
-            db.unvoted_proposer(&VOTER_GENESIS_HASHES[0], &db.best_proposer().unwrap())
-                .unwrap(),
-            vec![new_proposer_block_1.hash()]
-        );
-
-        let new_voter_content = Content::Voter(voter::Content::new(
-            0,
-            VOTER_GENESIS_HASHES[0],
-            vec![new_proposer_block_1.hash()],
-        ));
-        let new_voter_block = Block::new(
-            new_proposer_block_2.hash(),
-            0,
-            0,
-            H256::default(),
-            vec![],
-            new_voter_content,
-            [2; 32],
-            H256::default(),
-        );
-        db.insert_block(&new_voter_block).unwrap();
-
-        assert_eq!(
-            db.unvoted_proposer(&VOTER_GENESIS_HASHES[0], &db.best_proposer().unwrap())
-                .unwrap(),
-            vec![new_proposer_block_1.hash()]
-        );
-        assert_eq!(
-            db.unvoted_proposer(&new_voter_block.hash(), &db.best_proposer().unwrap())
-                .unwrap(),
-            vec![]
-        );
-    }
-
-    #[test]
-    fn merge_operator_h256_vec() {
-        let db = BlockChain::new("/tmp/prism_test_blockchain_merge_op_h256_vec.rocksdb").unwrap();
-        let cf = db.db.cf_handle(PARENT_NEIGHBOR_CF).unwrap();
-
-        let hash_1: H256 = [0u8; 32].into();
-        let hash_2: H256 = [1u8; 32].into();
-        let hash_3: H256 = [2u8; 32].into();
-        // merge with an nonexistent entry
-        db.db
-            .merge_cf(cf, b"testkey", serialize(&hash_1).unwrap())
-            .unwrap();
-        let result: Vec<H256> =
-            deserialize(&db.db.get_pinned_cf(cf, b"testkey").unwrap().unwrap()).unwrap();
-        assert_eq!(result, vec![hash_1]);
-
-        // merge with an existing entry
-        db.db
-            .merge_cf(cf, b"testkey", serialize(&hash_2).unwrap())
-            .unwrap();
-        db.db
-            .merge_cf(cf, b"testkey", serialize(&hash_3).unwrap())
-            .unwrap();
-        let result: Vec<H256> =
-            deserialize(&db.db.get_pinned_cf(cf, b"testkey").unwrap().unwrap()).unwrap();
-        assert_eq!(result, vec![hash_1, hash_2, hash_3]);
-    }
-
-    #[test]
-    fn merge_operator_btreemap() {
-        let db = BlockChain::new("/tmp/prism_test_blockchain_merge_op_u64_vec.rocksdb").unwrap();
-        let cf = db.db.cf_handle(PROPOSER_NODE_VOTE_CF).unwrap();
-
-        // merge with an nonexistent entry
-        db.db
-            .merge_cf(
-                cf,
-                b"testkey",
-                serialize(&(true, 0 as u16, 0 as u64)).unwrap(),
-            )
-            .unwrap();
-        let result: Vec<(u16, u64)> =
-            deserialize(&db.db.get_pinned_cf(cf, b"testkey").unwrap().unwrap()).unwrap();
-        assert_eq!(result, vec![(0, 0)]);
-
-        // insert
-        db.db
-            .merge_cf(
-                cf,
-                b"testkey",
-                serialize(&(true, 10 as u16, 0 as u64)).unwrap(),
-            )
-            .unwrap();
-        db.db
-            .merge_cf(
-                cf,
-                b"testkey",
-                serialize(&(true, 5 as u16, 0 as u64)).unwrap(),
-            )
-            .unwrap();
-        let result: Vec<(u16, u64)> =
-            deserialize(&db.db.get_pinned_cf(cf, b"testkey").unwrap().unwrap()).unwrap();
-        assert_eq!(result, vec![(0, 0), (10, 0), (5, 0)]);
-
-        // remove
-        db.db
-            .merge_cf(
-                cf,
-                b"testkey",
-                serialize(&(false, 5 as u16, 0 as u64)).unwrap(),
-            )
-            .unwrap();
-        let result: Vec<(u16, u64)> =
-            deserialize(&db.db.get_pinned_cf(cf, b"testkey").unwrap().unwrap()).unwrap();
-        assert_eq!(result, vec![(0, 0), (10, 0)]);
-    }
-}
-*/

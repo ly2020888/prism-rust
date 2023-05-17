@@ -66,7 +66,7 @@ impl TransactionGenerator {
             control_chan: rx,
             arrival_distribution: ArrivalDistribution::Uniform(UniformArrival { interval: 100 }),
             value_distribution: ValueDistribution::Uniform(UniformValue { min: 50, max: 100 }),
-            state: State::Continuous(10000),
+            state: State::Step(1),
         };
         (instance, tx)
     }
@@ -124,6 +124,10 @@ impl TransactionGenerator {
                     },
                     State::Paused => {
                         // block until we get a signal
+                        info!(
+                            "transaction generates PAUSED, now number of transaction is {}",
+                            self.mempool.lock().unwrap().len()
+                        );
                         let signal = self.control_chan.recv().unwrap();
                         self.handle_control_signal(signal);
                         continue;
@@ -155,6 +159,7 @@ impl TransactionGenerator {
                 // PERFORMANCE_COUNTER.record_generate_transaction(&transaction);
                 match transaction {
                     Ok(t) => {
+                        debug!("{:?}", t);
                         new_transaction(t, &self.mempool, &self.server);
                         // if we are in stepping mode, decrease the step count
                         if let State::Step(step_count) = self.state {
@@ -191,7 +196,7 @@ impl TransactionGenerator {
 pub mod tests {
     use std::{net::SocketAddr, sync::Arc};
 
-    use tokio::sync::mpsc::{self};
+    use tokio::sync::mpsc;
     use tracing::{debug, Level};
     use tracing_subscriber::FmtSubscriber;
 

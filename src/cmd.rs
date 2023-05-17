@@ -7,6 +7,10 @@ pub struct Cli {
     #[arg(short, long, default_value_t = String::from("127.0.0.1:6000"))]
     pub p2p: String,
 
+    /// Sets the IP address and the port of the P2P server
+    #[arg(long)]
+    pub p2p_id: u16,
+
     /// Sets the peers to connect to at start
     #[arg(long)]
     pub known_peer: Vec<String>,
@@ -70,4 +74,8 @@ pub struct Cli {
     /// Set simulate the block rate,
     #[arg(long)]
     pub block_rate: f32,
+
+    /// weight of node or block produced by this node
+    #[arg(long)]
+    pub block_weight: u32,
 }

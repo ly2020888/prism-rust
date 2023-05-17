@@ -33,6 +33,12 @@ pub struct BlockchainConfig {
 
     /// 提交权重门限
     pub confirm: u32,
+
+    /// 启动的节点的编号，范围应当是[0,voter_chains)
+    pub node_id: u16,
+
+    /// 单个区块的权重
+    pub block_weight: u32,
 }
 
 impl BlockchainConfig {
@@ -42,6 +48,8 @@ impl BlockchainConfig {
         tx_throughput: u32,
         block_rate: f32,
         confirm: u32,
+        node_id: u16,
+        block_weight: u32,
     ) -> Self {
         let tx_txs = block_size / AVG_TX_SIZE;
 
@@ -62,6 +70,10 @@ impl BlockchainConfig {
             tx_thruput / tx_txs
         };
 
+        if node_id >= voter_chains {
+            panic!("请确保节点的编号范围位于总结点数量内，请保证节点的编号不会重复");
+        }
+
         Self {
             voter_chains,
             tx_txs,
@@ -70,6 +82,8 @@ impl BlockchainConfig {
             tx_throughput,
             block_rate,
             confirm,
+            node_id,
+            block_weight,
         }
     }
 }
