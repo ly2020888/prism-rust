@@ -1,6 +1,6 @@
 use crate::crypto::hash::{Hashable, H256};
-/// The header of a block.
 
+/// The header of a block.
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, Copy)]
 pub struct Header {
     /// Hash of this block

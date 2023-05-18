@@ -47,10 +47,9 @@ impl Hashable for Transaction {
             return h;
         }
         drop(hash);
-        let mut hash_mut = self.hash;
+
         let hash: H256 =
             ring::digest::digest(&ring::digest::SHA256, &serialize(self).unwrap()).into();
-        hash_mut = Some(hash);
         hash
     }
 }

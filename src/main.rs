@@ -1,18 +1,10 @@
-#[macro_use]
 extern crate clap;
 
-use base64::{
-    alphabet,
-    engine::{self, general_purpose},
-    Engine as _,
-};
-use crossbeam::channel;
-use ed25519_dalek::Keypair;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::unbounded_channel;
 // use prism::api::Server as ApiServer;
 use prism::config::BlockchainConfig;
-use prism::crypto::hash::H256;
-use prism::{blockchain::BlockChain, transaction::Account, wallet};
+use prism::{blockchain::BlockChain, wallet};
 use prism::{blockdb::BlockDatabase, experiment::transaction_generator::TransactionGenerator};
 // use prism::experiment::transaction_generator::TransactionGenerator;
 // use prism::ledger_manager::LedgerManager;
@@ -24,13 +16,11 @@ use prism::network::server;
 use prism::network::worker;
 // use prism::visualization::Server as VisualizationServer;
 use prism::cmd;
-use prism::wallet::Wallet;
 use std::net;
-use std::process;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread;
 use std::time;
-use std::{convert::TryInto, net::SocketAddr};
 
 use tracing::{debug, error, info};
 
@@ -91,7 +81,7 @@ async fn main() {
 
     // create channels between server and worker, worker and miner, miner and worker
     let (msg_tx, msg_rx) = mpsc::channel(100); // TODO: make this buffer adjustable
-    let (ctx_tx, ctx_rx) = channel::unbounded();
+    let (ctx_tx, ctx_rx) = unbounded_channel();
     let ctx_tx_miner = ctx_tx.clone();
 
     // start the p2p server

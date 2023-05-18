@@ -62,7 +62,7 @@ impl BlockDatabase {
         let mut counter: u64 = 0;
 
         // insert voter genesis blocks
-        for i in 1..=config.voter_chains {
+        for i in 0..config.voter_chains {
             db.db.put_cf(
                 block_cf,
                 &config.genesis_hashes[i as usize],

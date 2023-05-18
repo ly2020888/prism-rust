@@ -13,13 +13,13 @@ use crate::miner::memory_pool::MemoryPool;
 use crate::miner::ContextUpdateSignal;
 use crate::network::server::Handle as ServerHandle;
 use crate::validation::{self, BlockResult};
-use crossbeam::channel;
-use log::{debug, warn};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::runtime;
 use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::{debug, warn};
 
 type MsgChan = Arc<Mutex<Receiver<(Vec<u8>, peer::Handle)>>>;
 
@@ -31,7 +31,7 @@ pub struct Context {
     blockdb: Arc<BlockDatabase>,
     balancedb: Arc<BalanceDatabase>,
     mempool: Arc<Mutex<MemoryPool>>,
-    context_update_chan: channel::Sender<ContextUpdateSignal>,
+    context_update_chan: UnboundedSender<ContextUpdateSignal>,
     server: ServerHandle,
     buffer: Arc<Mutex<BlockBuffer>>,
     recent_blocks: Arc<Mutex<HashSet<H256>>>, // blocks that we have received but not yet inserted
@@ -46,7 +46,7 @@ pub fn new(
     blockdb: &Arc<BlockDatabase>,
     balancedb: &Arc<BalanceDatabase>,
     mempool: &Arc<Mutex<MemoryPool>>,
-    ctx_update_sink: channel::Sender<ContextUpdateSignal>,
+    ctx_update_sink: UnboundedSender<ContextUpdateSignal>,
     server: &ServerHandle,
     config: BlockchainConfig,
 ) -> Context {

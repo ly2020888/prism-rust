@@ -5,10 +5,10 @@ use crate::crypto::hash::{Hashable, H256};
 
 //use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 use bincode::{deserialize, serialize};
-use log::{debug, info, warn};
 use rand::Rng;
 use rocksdb::{ColumnFamilyDescriptor, MergeOperands, Options, WriteBatch, DB};
 use statrs::distribution::{Discrete, Poisson};
+use tracing::{debug, info, warn};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -322,6 +322,9 @@ impl BlockChain {
             let rand_num = rng.gen_range(0, self.config.voter_chains);
             if rand_num != chain_id {
                 break rand_num;
+            }
+            if self.config.voter_chains == 1 {
+                break 0;
             }
         };
         let chains_hashs = self.voter_ledger_tips.lock().unwrap();

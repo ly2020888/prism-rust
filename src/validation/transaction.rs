@@ -48,11 +48,7 @@ pub fn check_signature_batch(transactions: &[Transaction]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        crypto::hash::H256,
-        transaction::{self, Account, Transaction},
-        wallet::{self, Wallet},
-    };
+    use crate::{crypto::hash::H256, transaction::Account, wallet::Wallet};
     use rand::Rng;
 
     pub fn generate_random_hash() -> H256 {
@@ -62,6 +58,7 @@ mod tests {
         raw_bytes.copy_from_slice(&random_bytes);
         (&raw_bytes).into()
     }
+
     #[test]
     fn test_check_signature() {
         let my_acc = Account {

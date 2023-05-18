@@ -66,7 +66,7 @@ impl TransactionGenerator {
             control_chan: rx,
             arrival_distribution: ArrivalDistribution::Uniform(UniformArrival { interval: 100 }),
             value_distribution: ValueDistribution::Uniform(UniformValue { min: 50, max: 100 }),
-            state: State::Step(1),
+            state: State::Step(10),
         };
         (instance, tx)
     }
