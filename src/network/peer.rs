@@ -1,10 +1,10 @@
 use super::message;
 
-use log::trace;
 use tokio::net::TcpStream;
 use tokio::runtime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tracing::trace;
 
 pub fn new(stream: &TcpStream) -> std::io::Result<(UnboundedReceiver<Vec<u8>>, Handle)> {
     let (write_sender, write_receiver) = mpsc::unbounded_channel(); // TODO: think about the buffer size here

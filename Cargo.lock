@@ -1106,7 +1106,6 @@ dependencies = [
  "hex",
  "hex-literal",
  "lazy_static",
- "log",
  "mio 0.8.6",
  "mio-extras",
  "rand 0.7.3",

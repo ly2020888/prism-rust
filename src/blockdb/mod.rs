@@ -1,4 +1,3 @@
-use crate::block::content::proposer_genesis;
 use crate::block::content::voter_genesis;
 use crate::block::Block;
 use crate::config::*;
@@ -9,6 +8,8 @@ use std::convert::TryInto;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const BLOCK_CF: &str = "BLOCK";
+// block hash
+const BLOCK_COMFIRMED_CF: &str = "BLOCK_COMFIRMED";
 const BLOCK_ARRIVAL_ORDER_CF: &str = "BLOCK_ARRIVAL_ORDER";
 const BLOCK_SEQUENCE_NUMBER_CF: &str = "BLOCK_SEQUENCE_NUMBER";
 
@@ -30,13 +31,27 @@ impl BlockDatabase {
         opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
         opts.optimize_for_point_lookup(512);
         let block_cf = ColumnFamilyDescriptor::new(BLOCK_CF, opts);
+
         let block_arrival_order_cf =
             ColumnFamilyDescriptor::new(BLOCK_ARRIVAL_ORDER_CF, Options::default());
+
         let mut opts = Options::default();
         opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
         opts.optimize_for_point_lookup(512);
         let block_sequence_number_cf = ColumnFamilyDescriptor::new(BLOCK_SEQUENCE_NUMBER_CF, opts);
-        let cfs = vec![block_cf, block_arrival_order_cf, block_sequence_number_cf];
+
+        let mut opts = Options::default();
+        opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(32));
+        opts.optimize_for_point_lookup(512);
+        let block_comfirmed_cf = ColumnFamilyDescriptor::new(BLOCK_COMFIRMED_CF, opts);
+
+        let cfs = vec![
+            block_cf,
+            block_arrival_order_cf,
+            block_sequence_number_cf,
+            block_comfirmed_cf,
+        ];
+
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);

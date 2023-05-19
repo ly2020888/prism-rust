@@ -69,7 +69,7 @@ async fn main() {
 
     // init blockchain database
     // 共识层
-    let blockchain = BlockChain::new(cli.blockchain_db, config.clone()).unwrap();
+    let blockchain = BlockChain::new(cli.blockchain_db, blockdb.clone(), config.clone()).unwrap();
     let blockchain = Arc::new(blockchain);
     debug!("Initialized blockchain database");
 
@@ -109,13 +109,12 @@ async fn main() {
     let (miner_ctx, _miner) = miner::new(
         &mempool,
         &blockchain,
-        &blockdb,
         ctx_rx,
         &ctx_tx_miner,
         &server,
         config.clone(),
     );
-    miner_ctx.start();
+    miner_ctx.start().await;
 
     // connect to known peers
     let known_peers: Vec<String> = cli.known_peer;

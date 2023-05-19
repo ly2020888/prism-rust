@@ -249,7 +249,8 @@ fn get_time() -> u128 {
 mod tests {
     use super::*;
     use crate::{
-        experiment::transaction_generator, miner::memory_pool::MemoryPool, network::server, wallet,
+        blockdb::BlockDatabase, experiment::transaction_generator, miner::memory_pool::MemoryPool,
+        network::server, wallet,
     };
     use std::{net::SocketAddr, sync::Arc};
     use tokio::sync::mpsc;
@@ -297,13 +298,19 @@ mod tests {
 
         let test_config = BlockchainConfig::new(1, 256, 1000, 100.0, 10, 0, 10);
 
+        // init block database
+        let blockdb = BlockDatabase::new("./rocksdb/blockcdb", test_config.clone()).unwrap();
+        let blockdb = Arc::new(blockdb);
+        debug!("Initialized block database");
+
         // start the miner
         // 注：miner无挖矿动作，仅仅是按照固定速率打包区块
         // TODO:添加挖矿逻辑
 
         // init blockchain database
         // 共识层
-        let blockchain = BlockChain::new("./rocksdb/blockchain", test_config.clone()).unwrap();
+        let blockchain =
+            BlockChain::new("./rocksdb/blockchain", blockdb, test_config.clone()).unwrap();
         let blockchain = Arc::new(blockchain);
         debug!("Initialized blockchain database");
 
