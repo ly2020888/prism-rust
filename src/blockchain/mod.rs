@@ -1,6 +1,6 @@
 /// ! 共识层
 mod column;
-use crate::block::{Block, Content};
+use crate::block::{content, Block, Content};
 use crate::blockdb::BlockDatabase;
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};
@@ -58,6 +58,7 @@ impl BlockChain {
         add_cf!(VOTER_NODE_CHAIN_CF);
 
         // level (u64) to hash of block (proposer hash)
+        // only proposer block
         add_cf!(PROPOSER_TREE_LEVEL_CF);
 
         // the  parent of a block's hash
@@ -65,6 +66,9 @@ impl BlockChain {
 
         // the block 's proposer level
         add_cf!(PROPOSER_NODE_LEVEL_CF);
+
+        // record werther the block is proposer block
+        add_cf!(PROPOSER_CF);
 
         // all weights on a uncomfirmed proposer block
         // hash | u64
@@ -141,11 +145,11 @@ impl BlockChain {
         // get cf handles
         let voter_node_chain_cf = self.db.cf_handle(VOTER_NODE_CHAIN_CF).unwrap();
         let proposer_tree_level_cf = self.db.cf_handle(PROPOSER_TREE_LEVEL_CF).unwrap();
-
         let parent_neighbor_cf = self.db.cf_handle(PARENT_NEIGHBOR_CF).unwrap();
         let proposer_vote_count_cf = self.db.cf_handle(PROPOSER_VOTE_COUNT_CF).unwrap();
         let block_ref_neighbor_cf = self.db.cf_handle(BLOCK_REF_NEIGHBOR_CF).unwrap();
         let proposer_node_level_cf = self.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
+        let proposer_cf = self.db.cf_handle(PROPOSER_CF).unwrap();
 
         let mut wb = WriteBatch::default();
 
@@ -185,19 +189,17 @@ impl BlockChain {
                 // note that the parent is the first proposer block that we refer
                 let mut refed_proposer: Vec<H256> = vec![parent_hash];
                 refed_proposer.extend(&content.refs);
+
                 put_value!(block_ref_neighbor_cf, block_hash, refed_proposer);
 
-                // get current block level
-                let parent_level: u64 = get_value!(proposer_node_level_cf, parent_hash);
-                let self_level = parent_level + 1;
                 // set current block level
-                put_value!(proposer_node_level_cf, block_hash, self_level as u64);
-                put_value!(proposer_tree_level_cf, self_level, block_hash);
+                put_value!(proposer_node_level_cf, block_hash, content.height);
+                put_value!(proposer_tree_level_cf, content.height, block_hash);
 
                 // 更新proposer_ledger_tip，新的proposer区块变为tip
                 let mut proposer_tip = self.proposer_ledger_tip.lock().unwrap();
-                assert!(*proposer_tip < self_level);
-                *proposer_tip = self_level;
+                assert!(*proposer_tip < content.height);
+                *proposer_tip = content.height;
                 drop(proposer_tip);
 
                 // 保存proposer区块所属的链 voter_node_chain_cf
@@ -220,49 +222,50 @@ impl BlockChain {
                 unconfirmed_proposers.insert(block_hash);
                 drop(unconfirmed_proposers);
 
+                // 记录收到的proposer区块
+                put_value!(proposer_cf, block_hash, content.height);
+                self.db.write(wb)?;
+
                 debug!(
                     "Adding proposer block {:.8} at level {}",
-                    block_hash, self_level
+                    block_hash, content.height
                 );
             }
             Content::Voter(content) => {
                 // 收到一个voter区块，更新相关的列族，更新累计权重。
+
+                // add ref'ed blocks
+                // note that the parent is the first proposer block that we refer
+                let mut refed_proposer: Vec<H256> = vec![parent_hash];
+                refed_proposer.extend(&content.refs);
+                put_value!(block_ref_neighbor_cf, block_hash, refed_proposer);
+
+                // 添加普通区块的领导者区块等级
+                put_value!(proposer_node_level_cf, block_hash, content.height);
                 // add voter parent
                 let voter_parent_hash = content.parent;
-                put_value!(voter_parent_neighbor_cf, block_hash, voter_parent_hash);
+                put_value!(parent_neighbor_cf, block_hash, voter_parent_hash);
                 // get current block level and chain number
-                let voter_parent_level: u64 = get_value!(voter_node_level_cf, voter_parent_hash);
                 let voter_parent_chain: u16 = get_value!(voter_node_chain_cf, voter_parent_hash);
-                let self_level = voter_parent_level + 1;
                 let self_chain = voter_parent_chain;
-                // set current block level and chain number
-                put_value!(voter_node_level_cf, block_hash, self_level as u64);
-                put_value!(voter_node_chain_cf, block_hash, self_chain as u16);
-                merge_value!(
-                    voter_tree_level_count_cf,
-                    (self_chain as u16, self_level as u64),
-                    1 as u64
-                );
+
+                put_value!(voter_node_chain_cf, block_hash, self_chain);
+
                 // add voting blocks for the proposer
                 // 在这里更新权重
-                for proposer_hash in &content.refs {
-                    merge_value!(proposer_vote_count_cf, proposer_hash, 1 as u64);
+                let unconfirmed_proposers = self.unconfirmed_proposers.lock().unwrap();
+                for proposer_hash in unconfirmed_proposers.iter() {
+                    let proposer_height: u64 = get_value!(proposer_vote_count_cf, proposer_hash);
+                    if proposer_height <= content.height {
+                        merge_value!(proposer_vote_count_cf, proposer_hash, content.weight as u64);
+                    }
                 }
-                // add voted blocks and set deepest voted level
-                put_value!(vote_neighbor_cf, block_hash, content.refs);
-                // set the voted level to be until proposer parent
-                let proposer_parent_level: u64 = get_value!(proposer_node_level_cf, parent_hash);
-                put_value!(
-                    voter_node_voted_level_cf,
-                    block_hash,
-                    proposer_parent_level as u64
-                );
+                drop(unconfirmed_proposers);
 
                 self.db.write(wb)?;
-
                 debug!(
                     "Adding voter block {:.8} at chain {} level {}",
-                    block_hash, self_chain, self_level
+                    block_hash, self_chain, content.height
                 );
             }
         }
@@ -278,10 +281,72 @@ impl BlockChain {
         chains_hashs[chain_id]
     }
 
-    pub fn get_current_height(&self) -> u64 {
+    pub fn get_proposer_height(&self) -> u64 {
         let height = self.proposer_ledger_tip.lock().unwrap();
-        let height = height.to_owned();
-        height
+        *height + 1
+    }
+
+    pub fn make_proposer_valid(&self, content: &mut content::Content) -> Result<()> {
+        let (res, _) = self.is_proposer_block(content.parent)?;
+        if res {
+            return Ok(());
+        }
+        for hash in &content.refs {
+            let (res, height) = self.is_proposer_block(*hash)?;
+            if res && height + 1 == content.height {
+                return Ok(());
+            }
+        }
+        // 无合法的领导者区块引用，现在手动更新
+        let now_proposer_height = self.proposer_ledger_tip.lock().unwrap();
+        let proposer_tree_level_cf = self.db.cf_handle(PROPOSER_TREE_LEVEL_CF).unwrap();
+        let hash: H256 = deserialize(
+            &self
+                .db
+                .get_pinned_cf(
+                    proposer_tree_level_cf,
+                    serialize(&*now_proposer_height).unwrap(),
+                )?
+                .unwrap(),
+        )
+        .unwrap();
+        let refs = vec![hash];
+        content.refs = refs;
+        Ok(())
+    }
+
+    pub fn get_voter_height(&self, refs: Vec<H256>) -> u64 {
+        // 普通区块的proposer_height必须进行计算
+        let proposer_node_level_cf = self.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
+        let mut max: u64 = 0;
+        for r in refs {
+            let height: u64 = deserialize(
+                &self
+                    .db
+                    .get_pinned_cf(proposer_node_level_cf, serialize(&r).unwrap())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            if height >= max {
+                max = height;
+            }
+        }
+        max
+    }
+
+    pub fn is_proposer_block(&self, hash: H256) -> Result<(bool, u64)> {
+        let proposer_cf = self.db.cf_handle(PROPOSER_CF).unwrap();
+        match self
+            .db
+            .get_pinned_cf(proposer_cf, serialize(&hash).unwrap())?
+        {
+            Some(height) => {
+                let height = deserialize(&height).unwrap();
+                Ok((true, height))
+            }
+            None => Ok((false, 0)),
+        }
     }
 
     pub fn get_block_ref(&self, chain_id: u16) -> H256 {

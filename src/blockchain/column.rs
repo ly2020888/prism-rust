@@ -35,3 +35,5 @@ pub const BLOCK_REF_NEIGHBOR_CF: &str = "GRAPH_BLOCK_REF_NEIGHBOR";
 
 /// the block 's proposer level
 pub const PROPOSER_NODE_LEVEL_CF: &str = "PROPOSER_NODE_LEVEL_CF";
+
+pub const PROPOSER_CF: &str = "PROPOSER_CF";

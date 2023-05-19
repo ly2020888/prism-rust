@@ -1,6 +1,11 @@
 mod proposer_block;
 mod transaction;
 mod voter_block;
+use std::f32::consts::E;
+use std::sync::Arc;
+
+use tracing::info;
+
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
@@ -17,6 +22,8 @@ pub enum BlockResult {
     WrongProposerRef,
     /// A voter block has a out-of-range chain number.
     WrongChainNumber,
+    /// 错误的领导者区块，不符合连接规则
+    WrongProposerBlock,
     EmptyTransaction,
     ZeroValue,
     InsufficientInput,
@@ -38,6 +45,7 @@ impl std::fmt::Display for BlockResult {
             }
             BlockResult::InsufficientInput => write!(f, "insufficient input"),
             BlockResult::WrongSignature => write!(f, "signature mismatch"),
+            BlockResult::WrongProposerBlock => write!(f, "错误的领导者区块，不符合连接规则"),
         }
     }
 }
@@ -65,6 +73,12 @@ pub fn check_data_availability(
             if !missing_refs.is_empty() {
                 missing.extend_from_slice(&missing_refs);
             }
+            let mut refs = vec![content.parent];
+            refs.extend(&content.refs);
+            let res = check_proposer_refs(refs, content.height, &blockchain);
+            if !res {
+                return BlockResult::WrongProposerBlock;
+            }
         }
         Content::Voter(content) => {
             // check for missing references
@@ -88,4 +102,28 @@ fn check_block_exists(hash: H256, blockchain: &BlockChain) -> bool {
         Err(e) => panic!("Blockchain error {}", e),
         Ok(b) => b,
     }
+}
+
+fn check_proposer_refs(refs: Vec<H256>, height: u64, blockchain: &BlockChain) -> bool {
+    // 如果proposer区块没有引用proposer区块
+    // 如果引用了但是高度不严格等于其加1
+    // 均验证不通过
+    for hash in refs {
+        match blockchain.is_proposer_block(hash) {
+            Ok((true, inner_height)) => {
+                if inner_height + 1 == height {
+                    return true;
+                }
+            }
+            Ok((false, _)) => {
+                continue;
+            }
+            Err(e) => {
+                info!("{:?}", e);
+                return false;
+            }
+        }
+    }
+
+    return false;
 }

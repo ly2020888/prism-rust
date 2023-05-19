@@ -19,5 +19,9 @@ pub fn get_missing_references(
         }
     }
 
+    let tx_block = check_block_exists(content.parent, blockchain);
+    if !tx_block {
+        missing_blocks.push(content.parent);
+    }
     missing_blocks
 }

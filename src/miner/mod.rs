@@ -5,13 +5,15 @@ use crate::block::header::Header;
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
 use crate::config::*;
-use crate::crypto::hash::Hashable;
+use crate::crypto::hash::{Hashable, H256};
 use crate::crypto::merkle::MerkleTree;
 use crate::network::message::Message;
 // use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 // use crate::handler::new_validated_block;
+use crate::blockdb::BlockDatabase;
 use crate::network::server::Handle as ServerHandle;
-
+use crate::validation::check_data_availability;
+use crate::validation::BlockResult;
 use tracing::{debug, error, info};
 
 use memory_pool::MemoryPool;
@@ -46,6 +48,7 @@ enum OperatingState {
 pub struct Context {
     blockchain: Arc<BlockChain>,
     mempool: Arc<Mutex<MemoryPool>>,
+    blockdb: Arc<BlockDatabase>,
     /// Channel for receiving control signal
     control_chan: UnboundedReceiver<ControlSignal>,
     /// Channel for notifying miner of new content
@@ -65,6 +68,7 @@ pub struct Handle {
 pub fn new(
     mempool: &Arc<Mutex<MemoryPool>>,
     blockchain: &Arc<BlockChain>,
+    blockdb: &Arc<BlockDatabase>,
     ctx_update_source: UnboundedReceiver<ContextUpdateSignal>,
     ctx_update_tx: &UnboundedSender<ContextUpdateSignal>,
     server: &ServerHandle,
@@ -75,6 +79,7 @@ pub fn new(
     let ctx = Context {
         blockchain: Arc::clone(blockchain),
         mempool: Arc::clone(mempool),
+        blockdb: blockdb.clone(),
         control_chan: signal_chan_receiver,
         context_update_chan: ctx_update_source,
         _context_update_tx: ctx_update_tx.clone(),
@@ -174,10 +179,11 @@ impl Context {
             let time_stamp = get_time();
             let chain_id = self.config.node_id;
             let parent_hash = self.blockchain.get_parent_hash(chain_id as usize);
-            let height = self.blockchain.get_current_height();
+
             let weight = self.config.block_weight;
+
             let mut block_content =
-                content::Content::new(chain_id, parent_hash, vec![], vec![], weight, height);
+                content::Content::new(chain_id, parent_hash, vec![], vec![], weight, 0);
 
             // 第二步：打包交易
             let number_of_tx = self.config.tx_txs;
@@ -199,11 +205,22 @@ impl Context {
             let block = match self.context_update_chan.try_recv() {
                 Ok(sig) => match sig {
                     ContextUpdateSignal::NewProposerBlock => {
+                        // 注意，在协议中的高度height字段在不同的区块内拥有不同的含义
+                        // 与其称之为高度，可以称之为proposer_level
+                        block_content.height = self.blockchain.get_proposer_height();
+                        self.blockchain
+                            .make_proposer_valid(&mut block_content)
+                            .map_err(|e| error!("{:?}", e))
+                            .unwrap();
                         let content = Content::Proposer(block_content);
                         Block::from_header(block_header, content)
                     }
                     ContextUpdateSignal::NewVoterBlock => {
+                        let mut refed_proposer: Vec<H256> = vec![block_content.parent];
+                        refed_proposer.extend(&block_content.refs);
+                        block_content.height = self.blockchain.get_voter_height(refed_proposer);
                         let content = Content::Voter(block_content);
+
                         Block::from_header(block_header, content)
                     }
                 },
@@ -216,18 +233,30 @@ impl Context {
                 }
             };
             debug!("生产区块：{:?}", block);
-            // 启动本地共识
-            // let result = self.blockchain.concensus(&block);
-            // match result {
-            //     Ok(_) => {}
-            //     Err(e) => {
-            //         error!("{:?}", e);
-            //     }
-            // }
+            // 在此处进行区块的合法性验证
+            let verify_result =
+                check_data_availability(&block, &self.blockchain.clone(), &self.blockdb.clone());
 
-            // 广播区块
-            self.server
-                .broadcast(Message::NewBlockHashes(vec![block_header.hash.unwrap()]));
+            match verify_result {
+                BlockResult::Pass => {
+                    // 启动本地共识
+                    let result = self.blockchain.concensus(&block);
+                    match result {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("{:?}", e);
+                        }
+                    }
+
+                    // 广播区块
+                    self.server
+                        .broadcast(Message::NewBlockHashes(vec![block_header.hash.unwrap()]));
+                }
+                result => {
+                    error!("{}", result);
+                    continue;
+                }
+            }
         }
     }
 }
@@ -310,13 +339,14 @@ mod tests {
         // init blockchain database
         // 共识层
         let blockchain =
-            BlockChain::new("./rocksdb/blockchain", blockdb, test_config.clone()).unwrap();
+            BlockChain::new("./rocksdb/blockchain", blockdb.clone(), test_config.clone()).unwrap();
         let blockchain = Arc::new(blockchain);
         debug!("Initialized blockchain database");
 
         let (miner_ctx, miner) = super::new(
             &mempool,
             &blockchain,
+            &blockdb,
             test_channel_rc,
             &test_channel_tx,
             &server,

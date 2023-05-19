@@ -109,6 +109,7 @@ async fn main() {
     let (miner_ctx, _miner) = miner::new(
         &mempool,
         &blockchain,
+        &blockdb,
         ctx_rx,
         &ctx_tx_miner,
         &server,
