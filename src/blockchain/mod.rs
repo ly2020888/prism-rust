@@ -1,6 +1,6 @@
 /// ! 共识层
 mod column;
-use crate::block::{content, Block, Content};
+use crate::block::{content, header, Block, Content};
 use crate::blockdb::BlockDatabase;
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};
@@ -81,10 +81,6 @@ impl BlockChain {
         opts.create_if_missing(true);
         opts.create_missing_column_families(true);
         let db = DB::open_cf_descriptors(&opts, path, cfs)?;
-        let mut voter_best: Vec<Mutex<(H256, u64)>> = vec![];
-        for _ in 0..config.voter_chains {
-            voter_best.push(Mutex::new((H256::default(), 0)));
-        }
 
         let blockchain_db = Self {
             db,
@@ -133,6 +129,14 @@ impl BlockChain {
                 serialize(&db.config.genesis_hashes[chain_num as usize]).unwrap(),
                 serialize(&(0 as u64)).unwrap(),
             );
+            // 创世区块的父区块就是自己
+            wb.put_cf(
+                parent_neighbor_cf,
+                serialize(&db.config.genesis_hashes[chain_num as usize]).unwrap(),
+                serialize(&db.config.genesis_hashes[chain_num as usize]).unwrap(),
+            );
+            // 创世区块的初始累计权重
+
             voter_ledger_tips[chain_num as usize] = db.config.genesis_hashes[chain_num as usize];
         }
         drop(voter_ledger_tips);
@@ -208,11 +212,19 @@ impl BlockChain {
                 // 保存proposer区块父区块的hash parent_neighbor_cf
                 put_value!(parent_neighbor_cf, block_hash, parent_hash);
 
-                // 更新累计权重 proposer_vote_count_cf
+                // 更新先前累计权重 proposer_vote_count_cf
                 let mut unconfirmed_proposers = self.unconfirmed_proposers.lock().unwrap();
                 for proposer_block in unconfirmed_proposers.iter() {
-                    merge_value!(proposer_vote_count_cf, proposer_block, content.weight);
+                    merge_value!(
+                        proposer_vote_count_cf,
+                        proposer_block,
+                        content.weight as u64
+                    );
                 }
+
+                // 插入自己的初始累计权重
+                put_value!(proposer_vote_count_cf, block_hash, content.weight as u64);
+
                 // mark outself as unconfirmed proposer
                 // This could happen before committing to database, since this block has to become
                 // the leader or be referred by a leader. However, both requires the block to be
@@ -221,6 +233,9 @@ impl BlockChain {
                 // becomes the leader and is ready to be confirmed).
                 unconfirmed_proposers.insert(block_hash);
                 drop(unconfirmed_proposers);
+
+                // 更新链上最末端区块
+                self.update_tips(content.chain_id, &block_hash);
 
                 // 记录收到的proposer区块
                 put_value!(proposer_cf, block_hash, content.height);
@@ -255,12 +270,15 @@ impl BlockChain {
                 // 在这里更新权重
                 let unconfirmed_proposers = self.unconfirmed_proposers.lock().unwrap();
                 for proposer_hash in unconfirmed_proposers.iter() {
-                    let proposer_height: u64 = get_value!(proposer_vote_count_cf, proposer_hash);
+                    let proposer_height: u64 = get_value!(proposer_node_level_cf, proposer_hash);
                     if proposer_height <= content.height {
                         merge_value!(proposer_vote_count_cf, proposer_hash, content.weight as u64);
                     }
                 }
                 drop(unconfirmed_proposers);
+
+                // 更新链上最末端区块
+                self.update_tips(content.chain_id, &block_hash);
 
                 self.db.write(wb)?;
                 debug!(
@@ -269,8 +287,9 @@ impl BlockChain {
                 );
             }
         }
+
         // 检查是存在可以提交的区块
-        self.try_comfirm_proposer();
+        self.try_confirm_proposer()?;
 
         Ok(())
     }
@@ -286,7 +305,10 @@ impl BlockChain {
         *height + 1
     }
 
-    pub fn make_proposer_valid(&self, content: &mut content::Content) -> Result<()> {
+    pub fn make_proposer_valid(&self, content: &mut content::Content, parent: &H256) -> Result<()> {
+        if content.height == 1 {
+            return Ok(());
+        }
         let (res, _) = self.is_proposer_block(content.parent)?;
         if res {
             return Ok(());
@@ -310,7 +332,7 @@ impl BlockChain {
                 .unwrap(),
         )
         .unwrap();
-        let refs = vec![hash];
+        let refs = vec![parent.clone(), hash];
         content.refs = refs;
         Ok(())
     }
@@ -390,13 +412,38 @@ impl BlockChain {
         .unwrap();
         Ok(chain)
     }
+    fn update_tips(&self, chain_id: u16, hash: &H256) {
+        // 更新tips
+        let mut chains_hashs = self.voter_ledger_tips.lock().unwrap();
+        (*chains_hashs)[chain_id as usize] = hash.clone();
+        drop(chains_hashs);
+    }
 
-    pub fn try_comfirm_proposer(&self) {
+    fn try_confirm_proposer(&self) -> Result<()> {
+        let proposer_vote_count_cf = self.db.cf_handle(PROPOSER_VOTE_COUNT_CF).unwrap();
+        let uncomfirmed_blocks = self.unconfirmed_proposers.lock().unwrap();
+
+        for proposer_block in uncomfirmed_blocks.iter() {
+            let weight: u64 = deserialize(
+                &self
+                    .db
+                    .get_pinned_cf(proposer_vote_count_cf, serialize(proposer_block).unwrap())?
+                    .unwrap(),
+            )
+            .unwrap();
+            debug!("未提交proposer区块{:.8}, weight:{}", proposer_block, weight);
+        }
+        // unimplemented!();
+        Ok(())
+    }
+
+    // 这个函数负责从rocksdb中读取未到达阈值的领导者区块
+    fn _load_unconfirmed(&self) {
         unimplemented!();
     }
 }
 
-fn vote_vec_merge(
+fn _vote_vec_merge(
     _: &[u8],
     existing_val: Option<&[u8]>,
     operands: &rocksdb::merge_operator::MergeOperands,

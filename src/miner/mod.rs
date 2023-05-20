@@ -7,7 +7,7 @@ use crate::blockchain::BlockChain;
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};
 use crate::crypto::merkle::MerkleTree;
-use crate::network::message::Message;
+// use crate::network::message::Message;
 // use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 // use crate::handler::new_validated_block;
 use crate::blockdb::BlockDatabase;
@@ -209,7 +209,7 @@ impl Context {
                         // 与其称之为高度，可以称之为proposer_level
                         block_content.height = self.blockchain.get_proposer_height();
                         self.blockchain
-                            .make_proposer_valid(&mut block_content)
+                            .make_proposer_valid(&mut block_content, &parent_hash)
                             .map_err(|e| error!("{:?}", e))
                             .unwrap();
                         let content = Content::Proposer(block_content);
@@ -232,7 +232,7 @@ impl Context {
                     return;
                 }
             };
-            debug!("生产区块：{:?}", block);
+            // debug!("生产区块：{:?}", block);
             // 在此处进行区块的合法性验证
             let verify_result =
                 check_data_availability(&block, &self.blockchain.clone(), &self.blockdb.clone());
@@ -240,6 +240,7 @@ impl Context {
             match verify_result {
                 BlockResult::Pass => {
                     // 启动本地共识
+                    debug!("取得合法的区块：{:?}", block);
                     let result = self.blockchain.concensus(&block);
                     match result {
                         Ok(_) => {}
@@ -248,9 +249,9 @@ impl Context {
                         }
                     }
 
-                    // 广播区块
-                    self.server
-                        .broadcast(Message::NewBlockHashes(vec![block_header.hash.unwrap()]));
+                    // // 广播区块
+                    // self.server
+                    //     .broadcast(Message::NewBlockHashes(vec![block_header.hash.unwrap()]));
                 }
                 result => {
                     error!("{}", result);
@@ -325,7 +326,7 @@ mod tests {
 
         let (test_channel_tx, test_channel_rc) = unbounded_channel::<ContextUpdateSignal>();
 
-        let test_config = BlockchainConfig::new(1, 256, 1000, 100.0, 10, 0, 10);
+        let test_config = BlockchainConfig::new(2, 256, 1000, 100.0, 10, 1, 10);
 
         // init block database
         let blockdb = BlockDatabase::new("./rocksdb/blockcdb", test_config.clone()).unwrap();
@@ -366,6 +367,33 @@ mod tests {
 
             miner_ctx.start().await;
         });
-        //
+        // 开启第二个线程，模拟其他节点
+        let test_config = BlockchainConfig::new(2, 256, 1000, 100.0, 10, 0, 10);
+        let (test_channel_tx, test_channel_rc) = unbounded_channel::<ContextUpdateSignal>();
+
+        let (miner_ctx, miner) = super::new(
+            &mempool,
+            &blockchain,
+            &blockdb,
+            test_channel_rc,
+            &test_channel_tx,
+            &server,
+            test_config,
+        );
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        miner.start(10, false);
+
+        rt.block_on(async move {
+            test_channel_tx
+                .clone()
+                .send(ContextUpdateSignal::NewVoterBlock)
+                .unwrap();
+            test_channel_tx
+                .clone()
+                .send(ContextUpdateSignal::NewVoterBlock)
+                .unwrap();
+
+            miner_ctx.start().await;
+        });
     }
 }

@@ -73,11 +73,16 @@ pub fn check_data_availability(
             if !missing_refs.is_empty() {
                 missing.extend_from_slice(&missing_refs);
             }
-            let mut refs = vec![content.parent];
-            refs.extend(&content.refs);
-            let res = check_proposer_refs(refs, content.height, &blockchain);
-            if !res {
-                return BlockResult::WrongProposerBlock;
+            // 之所以要和1进行比较，是因为在一开始区块链中仅仅存在普通区块，连接规则不可能被满足，
+            // 因此高度为1的proposer区块跳过验证
+            // 一旦proposer区块的高度>1之后，proposer区块需要满足连接规则
+            if content.height != 1 {
+                let mut refs = vec![content.parent];
+                refs.extend(&content.refs);
+                let res = check_proposer_refs(refs, content.height, &blockchain);
+                if !res {
+                    return BlockResult::WrongProposerBlock;
+                }
             }
         }
         Content::Voter(content) => {
