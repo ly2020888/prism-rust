@@ -1,10 +1,11 @@
 use crate::crypto::hash::H256;
 use bigint::uint::U256;
 
+// const PROPOSER_TX_REF_HEADROOM: f32 = 10.0;
+// const SORTITION_PRECISION: u64 = std::u64::MAX;
+// const DECONFIRM_HEADROOM: f32 = 1.05;
+
 const AVG_TX_SIZE: u32 = 168; // average size of a transaction (in Bytes)
-const PROPOSER_TX_REF_HEADROOM: f32 = 10.0;
-const SORTITION_PRECISION: u64 = std::u64::MAX;
-const DECONFIRM_HEADROOM: f32 = 1.05;
 
 // Chain IDs
 pub const PROPOSER_INDEX: u16 = 0;
@@ -46,7 +47,6 @@ impl BlockchainConfig {
         voter_chains: u16,
         block_size: u32,
         tx_throughput: u32,
-        block_rate: f32,
         confirm: u32,
         node_id: u16,
         block_weight: u32,

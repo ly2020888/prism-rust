@@ -14,11 +14,10 @@ use crate::miner::ContextUpdateSignal;
 use crate::network::server::Handle as ServerHandle;
 use crate::validation::{self, BlockResult};
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use tokio::runtime;
+use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 type MsgChan = Arc<Mutex<Receiver<(Vec<u8>, peer::Handle)>>>;
@@ -30,7 +29,7 @@ pub struct Context {
     chain: Arc<BlockChain>,
     blockdb: Arc<BlockDatabase>,
     balancedb: Arc<BalanceDatabase>,
-    mempool: Arc<Mutex<MemoryPool>>,
+    mempool: Arc<std::sync::Mutex<MemoryPool>>,
     context_update_chan: UnboundedSender<ContextUpdateSignal>,
     server: ServerHandle,
     buffer: Arc<Mutex<BlockBuffer>>,
@@ -45,7 +44,7 @@ pub fn new(
     blockchain: &Arc<BlockChain>,
     blockdb: &Arc<BlockDatabase>,
     balancedb: &Arc<BalanceDatabase>,
-    mempool: &Arc<Mutex<MemoryPool>>,
+    mempool: &Arc<std::sync::Mutex<MemoryPool>>,
     ctx_update_sink: UnboundedSender<ContextUpdateSignal>,
     server: &ServerHandle,
     config: BlockchainConfig,
@@ -67,28 +66,24 @@ pub fn new(
 }
 
 impl Context {
-    pub fn start(self) {
+    pub fn start(&self) {
         let num_worker = self.num_worker;
         for i in 0..num_worker {
             let cloned = self.clone();
-            thread::spawn(move || {
-                cloned.worker_loop();
+            let msg_chan = Arc::clone(&self.msg_chan);
+
+            tokio::spawn(async move {
+                cloned.worker_loop(msg_chan).await;
                 warn!("Worker thread {} exited", i);
             });
         }
     }
 
-    fn worker_loop(&self) {
+    async fn worker_loop(&self, msg_chan: MsgChan) {
         loop {
-            let rt = runtime::Runtime::new().unwrap();
+            let mut msg_chan = msg_chan.lock().await;
+            let msg = msg_chan.recv().await.unwrap();
 
-            let msg = rt
-                .block_on(async {
-                    let msg_chan = Arc::clone(&self.msg_chan);
-                    let mut msg_chan = msg_chan.lock().unwrap();
-                    msg_chan.recv().await
-                })
-                .unwrap();
             // PERFORMANCE_COUNTER.record_process_message();
             let (msg, mut peer) = msg;
             let msg: Message = bincode::deserialize(&msg).unwrap();
@@ -136,14 +131,14 @@ impl Context {
                     let mut hashes_to_request = vec![];
                     for hash in hashes {
                         let in_blockdb = self.blockdb.contains(&hash).unwrap();
-                        let requested_blocks = self.requested_blocks.lock().unwrap();
+                        let requested_blocks = self.requested_blocks.lock().await;
                         let requested = requested_blocks.contains(&hash);
                         drop(requested_blocks);
                         if !(in_blockdb || requested) {
                             hashes_to_request.push(hash);
                         }
                     }
-                    let mut requested_blocks = self.requested_blocks.lock().unwrap();
+                    let mut requested_blocks = self.requested_blocks.lock().await;
                     for hash in &hashes_to_request {
                         requested_blocks.insert(*hash);
                     }
@@ -180,14 +175,14 @@ impl Context {
                         // where the block could have been removed from requested_blocks but not
                         // yet inserted into the database. but this does not cause correctness
                         // problem and hardly incurs a performance issue (I hope)
-                        let mut requested_blocks = self.requested_blocks.lock().unwrap();
+                        let mut requested_blocks = self.requested_blocks.lock().await;
                         requested_blocks.remove(&hash);
                         drop(requested_blocks);
 
                         // check whether the block is being processed. note that here we use lock
                         // to make sure that the hash either in recent_blocks, or blockdb, so we
                         // don't have a single duplicate
-                        let mut recent_blocks = self.recent_blocks.lock().unwrap();
+                        let mut recent_blocks = self.recent_blocks.lock().await;
                         if recent_blocks.contains(&hash) {
                             drop(recent_blocks);
                             continue;
@@ -201,7 +196,7 @@ impl Context {
                         // and lock/unlocks
                         // detect duplicates
                         if self.blockdb.contains(&hash).unwrap() {
-                            let mut recent_blocks = self.recent_blocks.lock().unwrap();
+                            let mut recent_blocks = self.recent_blocks.lock().await;
                             recent_blocks.remove(&hash);
                             drop(recent_blocks);
                             continue;
@@ -211,7 +206,7 @@ impl Context {
                         self.blockdb.insert_encoded(&hash, &encoded_block).unwrap();
 
                         // now that this block is store, remove the reference
-                        let mut recent_blocks = self.recent_blocks.lock().unwrap();
+                        let mut recent_blocks = self.recent_blocks.lock().await;
                         recent_blocks.remove(&hash);
                         drop(recent_blocks);
 
@@ -229,7 +224,8 @@ impl Context {
                         continue; // end processing this message
                     }
                     self.server
-                        .broadcast(Message::NewBlockHashes(hashes.clone()));
+                        .broadcast(Message::NewBlockHashes(hashes.clone()))
+                        .await;
 
                     // process each block
                     let mut to_process: Vec<Block> = blocks;
@@ -239,7 +235,7 @@ impl Context {
                         // check data availability
                         // make sure checking data availability and buffering are one atomic
                         // operation. see the comments in buffer.rs
-                        let mut buffer = self.buffer.lock().unwrap();
+                        let mut buffer = self.buffer.lock().await;
                         let data_availability =
                             validation::check_data_availability(&block, &self.chain, &self.blockdb);
                         match data_availability {
@@ -270,7 +266,7 @@ impl Context {
                             Content::Proposer(_) => ContextUpdateSignal::NewProposerBlock,
                             Content::Voter(_) => ContextUpdateSignal::NewVoterBlock,
                         });
-                        let mut buffer = self.buffer.lock().unwrap();
+                        let mut buffer = self.buffer.lock().await;
                         let mut resolved_by_current = buffer.satisfy(block.hash());
                         drop(buffer);
                         if !resolved_by_current.is_empty() {

@@ -4,7 +4,7 @@ use clap::Parser;
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     /// Sets the IP address and the port of the P2P server
-    #[arg(short, long, default_value_t = String::from("127.0.0.1:6000"))]
+    #[arg(short, long)]
     pub p2p: String,
 
     /// Sets the IP address and the port of the P2P server
@@ -16,40 +16,32 @@ pub struct Cli {
     pub known_peer: Vec<String>,
 
     /// Sets the path to the block database
-    #[arg(long,default_value_t = String::from("/tmp/prism-blocks.rocksdb"))]
+    #[arg(long,default_value_t = String::from("./rocksdb/blockdb"))]
     pub block_db: String,
 
     /// Sets the path to the balance database
-    #[arg(long,default_value_t = String::from("/tmp/prism-balancedb.rocksdb"))]
+    #[arg(long,default_value_t = String::from("./rocksdb/balancedb"))]
     pub balancedb: String,
 
     /// Sets the path to the blockchain database
-    #[arg(long,default_value_t = String::from("/tmp/prism-blockchain_db.rocksdb"))]
+    #[arg(long,default_value_t = String::from("./rocksdb/blockchain"))]
     pub blockchain_db: String,
-
-    /// Endows the given address an initial fund in the genesis block
-    #[arg(long)]
-    pub fund_addr: Vec<String>,
 
     /// Sets the value of each initial coin
     #[arg(long, default_value_t = 100)]
     pub fund_value: u64,
 
-    /// Loads a key pair into the wallet from the given path
-    #[arg(short, long)]
-    pub load_key_path: Vec<String>,
+    /// Sets the numbers of wallet's addresses
+    #[arg(long, default_value_t = 20)]
+    pub numbers_addr: usize,
 
     /// Sets the maximum number of transactions for the memory pool
-    #[arg(short, long)]
+    #[arg(short, long, default_value_t = 10_0000)]
     pub mempool_size: u64,
 
     /// Sets the number of voter chains
     #[arg(long)]
     pub voter_chains: u16,
-
-    /// Sets the number of worker threads for transaction execution
-    #[arg(short, long, default_value_t = 8)]
-    pub execution_workers: u64,
 
     /// Sets the number of worker threads for transaction execution
     #[arg(long, default_value_t = 16)]
@@ -64,18 +56,14 @@ pub struct Cli {
     pub confirm_confidence: u32,
 
     /// Set simulate the transaction rate, 0 indicates that no limited
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 10_000)]
     pub tx_throughput: u32,
 
     /// Set simulate the block size, 0 indicates that no more than 16KB
     #[arg(long, default_value_t = 0)]
     pub block_size: u32,
 
-    /// Set simulate the block rate,
-    #[arg(long)]
-    pub block_rate: f32,
-
     /// weight of node or block produced by this node
-    #[arg(long)]
+    #[arg(long, default_value_t = 10)]
     pub block_weight: u32,
 }

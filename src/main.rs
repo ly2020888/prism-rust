@@ -6,6 +6,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use prism::config::BlockchainConfig;
 use prism::{blockchain::BlockChain, wallet};
 use prism::{blockdb::BlockDatabase, experiment::transaction_generator::TransactionGenerator};
+use tracing_subscriber::FmtSubscriber;
 // use prism::experiment::transaction_generator::TransactionGenerator;
 // use prism::ledger_manager::LedgerManager;
 use crate::clap::Parser;
@@ -15,39 +16,33 @@ use prism::miner::memory_pool::MemoryPool;
 use prism::network::server;
 use prism::network::worker;
 // use prism::visualization::Server as VisualizationServer;
-use prism::cmd;
-use std::net;
+use prism::cmd::{self, Cli};
+use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::thread;
-use std::time;
-
-use tracing::{debug, error, info};
+use tracing::{debug, info, Level};
 
 #[tokio::main]
 async fn main() {
     // parse command line arguments
     let cli = cmd::Cli::parse();
-    // init logger
+    init(&cli);
 
     // init config struct
     let voter_chains: u16 = cli.voter_chains;
     let tx_throughput: u32 = cli.tx_throughput;
     let block_size: u32 = cli.block_size;
     let comfirm: u32 = cli.confirm_confidence;
-    let block_rate = cli.block_rate;
     let p2p_id = cli.p2p_id;
     let block_weight = cli.block_weight;
     let config = BlockchainConfig::new(
         voter_chains,
         block_size,
         tx_throughput,
-        block_rate,
         comfirm,
         p2p_id,
         block_weight,
     );
-    info!("block rate set to {} blks/s", config.block_rate);
 
     info!("Transaction rate set to {} tps", config.tx_throughput);
 
@@ -68,13 +63,9 @@ async fn main() {
     debug!("Initialized balance database");
 
     // init blockchain database
-    // 共识层
     let blockchain = BlockChain::new(cli.blockchain_db, blockdb.clone(), config.clone()).unwrap();
     let blockchain = Arc::new(blockchain);
     debug!("Initialized blockchain database");
-
-    // start thread to update ledger
-    let tx_workers = cli.execution_workers;
 
     // parse p2p server address
     let p2p_addr = cli.p2p.parse::<SocketAddr>().unwrap();
@@ -119,10 +110,10 @@ async fn main() {
 
     // connect to known peers
     let known_peers: Vec<String> = cli.known_peer;
-    connect_known_peers(known_peers, server.clone());
+    server::connect_known_peers(known_peers, server.clone());
 
     // fund the given addresses
-    let wallets = wallet::util::load_wallets(cli.fund_value);
+    let wallets = wallet::util::load_wallets(cli.numbers_addr, cli.fund_value);
 
     // start the transaction generator
     // txgen_control_chan 交易控制通道，暂时用不到
@@ -156,34 +147,20 @@ async fn main() {
     }
 }
 
-fn connect_known_peers(known_peers: Vec<String>, server: server::Handle) {
-    thread::spawn(move || {
-        for peer in known_peers {
-            loop {
-                let addr = match peer.parse::<net::SocketAddr>() {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!("Error parsing peer address {}: {}", &peer, e);
-                        break;
-                    }
-                };
-                match server.connect(addr) {
-                    Ok(_) => {
-                        info!("Connected to outgoing peer {}", &addr);
-                        break;
-                    }
-                    Err(e) => {
-                        error!(
-                            "Error connecting to peer {}, retrying in one second: {}",
-                            addr, e
-                        );
-                        thread::sleep(time::Duration::from_millis(1000));
-                        continue;
-                    }
-                }
-            }
-        }
-    });
+fn init(cli: &Cli) {
+    let _ = fs::create_dir(cli.block_db.clone());
+    let _ = fs::create_dir(cli.balancedb.clone());
+    let _ = fs::create_dir(cli.blockchain_db.clone());
+    let _ = fs::create_dir("./wallets");
+    // a builder for `FmtSubscriber`.
+    let subscriber = FmtSubscriber::builder()
+        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
+        // will be written to stdout.
+        .with_max_level(Level::TRACE)
+        // completes the builder.
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 }
 
 #[cfg(test)]

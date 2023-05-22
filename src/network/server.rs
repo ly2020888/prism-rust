@@ -2,10 +2,11 @@ use super::message;
 use super::peer;
 
 use std::collections::HashMap;
+use std::net;
 use std::net::SocketAddr;
+use std::time;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpSocket, TcpStream};
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tracing::{debug, error, info, trace};
 pub fn new(
@@ -20,7 +21,7 @@ pub fn new(
     let ctx = Context {
         peers: HashMap::new(),
         addr,
-        control_signal_receiver: control_signal_receiver,
+        control_signal_receiver,
         control_sender: control_signal_sender,
         new_msg_chan: msg_sink,
     };
@@ -38,8 +39,7 @@ pub struct Context {
 impl Context {
     /// Start a new server context.
     pub fn start(self) -> std::io::Result<()> {
-        let rt: Runtime = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
+        tokio::spawn(async move {
             match self.mainloop() {
                 Err(e) => {
                     error!("{:?}", e);
@@ -221,27 +221,32 @@ pub struct Handle {
 }
 
 impl Handle {
-    pub fn connect(&self, addr: std::net::SocketAddr) -> std::io::Result<peer::Handle> {
+    pub async fn connect(&self, addr: std::net::SocketAddr) -> std::io::Result<peer::Handle> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        let rt = Runtime::new().unwrap();
 
-        rt.block_on(
-            self.control_signal_sender
-                .send(ControlSignal::ConnectNewPeer(addr, sender)),
-        );
-        rt.block_on(receiver).unwrap()
+        if let Err(e) = self
+            .control_signal_sender
+            .send(ControlSignal::ConnectNewPeer(addr, sender))
+            .await
+        {
+            error!("{:?}", e);
+        }
+
+        receiver.await.unwrap()
     }
 
-    pub fn broadcast(&self, msg: message::Message) {
-        let rt = Runtime::new().unwrap();
-
-        rt.block_on(
-            self.control_signal_sender
-                .send(ControlSignal::BroadcastMessage(msg)),
-        );
+    pub async fn broadcast(&self, msg: message::Message) {
+        if let Err(e) = self
+            .control_signal_sender
+            .send(ControlSignal::BroadcastMessage(msg))
+            .await
+        {
+            error!("{:?}", e);
+        }
     }
 }
 
+#[derive(Debug)]
 enum ControlSignal {
     ConnectNewPeer(
         std::net::SocketAddr,
@@ -250,4 +255,34 @@ enum ControlSignal {
     BroadcastMessage(message::Message),
     GetNewPeer(TcpStream),
     DroppedPeer(std::net::SocketAddr),
+}
+
+pub fn connect_known_peers(known_peers: Vec<String>, server: Handle) {
+    tokio::spawn(async move {
+        for peer in known_peers {
+            loop {
+                let addr = match peer.parse::<net::SocketAddr>() {
+                    Ok(x) => x,
+                    Err(e) => {
+                        error!("Error parsing peer address {}: {}", &peer, e);
+                        break;
+                    }
+                };
+                match server.connect(addr).await {
+                    Ok(_) => {
+                        info!("Connected to outgoing peer {}", &addr);
+                        break;
+                    }
+                    Err(e) => {
+                        error!(
+                            "Error connecting to peer {}, retrying in one second: {}",
+                            addr, e
+                        );
+                        tokio::time::sleep(time::Duration::from_millis(1000)).await;
+                        continue;
+                    }
+                }
+            }
+        }
+    });
 }

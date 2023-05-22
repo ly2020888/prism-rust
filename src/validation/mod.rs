@@ -1,8 +1,6 @@
 mod proposer_block;
 mod transaction;
 mod voter_block;
-use std::f32::consts::E;
-use std::sync::Arc;
 
 use tracing::info;
 

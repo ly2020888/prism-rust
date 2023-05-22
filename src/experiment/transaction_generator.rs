@@ -235,7 +235,7 @@ pub mod tests {
         let (server_ctx, server) = server::new(p2p_addr, msg_tx).unwrap();
         server_ctx.start().unwrap();
 
-        let wallets = wallet::util::load_wallets(1_000_000);
+        let wallets = wallet::util::load_wallets(10, 1_000_000);
 
         let (txgen_ctx, _txgen_control_chan) =
             transaction_generator::TransactionGenerator::new(wallets, &server, &mempool);

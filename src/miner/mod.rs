@@ -7,7 +7,7 @@ use crate::blockchain::BlockChain;
 use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};
 use crate::crypto::merkle::MerkleTree;
-// use crate::network::message::Message;
+use crate::network::message::Message;
 // use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 // use crate::handler::new_validated_block;
 use crate::blockdb::BlockDatabase;
@@ -249,9 +249,10 @@ impl Context {
                         }
                     }
 
-                    // // 广播区块
-                    // self.server
-                    //     .broadcast(Message::NewBlockHashes(vec![block_header.hash.unwrap()]));
+                    // 广播区块
+                    self.server
+                        .broadcast(Message::NewBlockHashes(vec![block_header.hash.unwrap()]))
+                        .await;
                 }
                 result => {
                     error!("{}", result);
@@ -318,7 +319,7 @@ mod tests {
         let (server_ctx, server) = server::new(p2p_addr, msg_tx).unwrap();
         server_ctx.start().unwrap();
 
-        let wallets = wallet::util::load_wallets(1_000_000);
+        let wallets = wallet::util::load_wallets(10, 1_000_000);
 
         let (txgen_ctx, _txgen_control_chan) =
             transaction_generator::TransactionGenerator::new(wallets, &server, &mempool);
@@ -326,7 +327,7 @@ mod tests {
 
         let (test_channel_tx, test_channel_rc) = unbounded_channel::<ContextUpdateSignal>();
 
-        let test_config = BlockchainConfig::new(2, 256, 1000, 100.0, 10, 1, 10);
+        let test_config = BlockchainConfig::new(2, 256, 1000, 10, 1, 10);
 
         // init block database
         let blockdb = BlockDatabase::new("./rocksdb/blockcdb", test_config.clone()).unwrap();
@@ -367,33 +368,11 @@ mod tests {
 
             miner_ctx.start().await;
         });
-        // 开启第二个线程，模拟其他节点
-        let test_config = BlockchainConfig::new(2, 256, 1000, 100.0, 10, 0, 10);
-        let (test_channel_tx, test_channel_rc) = unbounded_channel::<ContextUpdateSignal>();
 
-        let (miner_ctx, miner) = super::new(
-            &mempool,
-            &blockchain,
-            &blockdb,
-            test_channel_rc,
-            &test_channel_tx,
-            &server,
-            test_config,
-        );
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        miner.start(10, false);
-
-        rt.block_on(async move {
-            test_channel_tx
-                .clone()
-                .send(ContextUpdateSignal::NewVoterBlock)
-                .unwrap();
-            test_channel_tx
-                .clone()
-                .send(ContextUpdateSignal::NewVoterBlock)
-                .unwrap();
-
-            miner_ctx.start().await;
-        });
+        let known_peers = vec!["127.0.0.1:8078".to_string()];
+        server::connect_known_peers(known_peers, server.clone());
+        loop {
+            std::thread::park();
+        }
     }
 }

@@ -5,6 +5,7 @@ use base64::Engine;
 use ed25519_dalek::Keypair;
 use rand::distributions::{Alphanumeric, Distribution};
 use std::fs::{self, OpenOptions};
+use std::io::Result;
 use std::io::Write;
 use std::process;
 use tracing::{error, info};
@@ -84,29 +85,28 @@ fn save_wallets_list(wallets: &Vec<Wallet>) {
         .create(true)
         .open(ROOT.to_string() + "total.txt")
         .unwrap();
+
     for wal in wallets {
         let save_path = format!("{}", wal.address())[0..8].to_owned() + ".txt";
         let total = format!("{}\n", wal.address()).to_string();
-
         let keypair = wal.get_keypair();
         fs::write(ROOT.to_string() + &save_path, keypair).unwrap();
-
         file.write(total.as_bytes()).unwrap();
     }
 }
 
-fn load_fund_addrs() -> Vec<String> {
-    let content = fs::read_to_string(ROOT.to_string() + "total.txt").unwrap();
+fn load_fund_addrs() -> Result<Vec<String>> {
+    let content = fs::read_to_string(ROOT.to_string() + "total.txt")?;
     let content = content
         .split("\n")
         .filter(|s| s.len() > 0)
         .map(|s| s.to_owned())
         .collect::<Vec<String>>();
-    content
+    Ok(content)
 }
 
 /// n指定了需要随机生成的账户数，生成在./wallets/total.txt
-pub fn save_wallets(n: usize, fund: u64) {
+pub fn save_wallets(n: usize, fund: u64) -> Vec<Wallet> {
     let mut random_fund_addr = vec![];
     let mut paths = vec![];
     for _ in 0..n {
@@ -116,20 +116,28 @@ pub fn save_wallets(n: usize, fund: u64) {
     }
     let wallets: Vec<Wallet> = create_wallets(random_fund_addr, fund);
     save_wallets_list(&wallets);
+    wallets
 }
 
 /// 读取wallet目录下的total.txt的账户所有秘钥
-pub fn load_wallets(fund: u64) -> Vec<Wallet> {
-    let addrs = load_fund_addrs();
-    let mut wallets: Vec<Wallet> = create_wallets(addrs.clone(), fund);
-    let mut paths = vec![];
-    for addr in addrs {
-        let path = ROOT.to_owned() + &format!("{}", addr)[0..8].to_owned() + ".txt";
-        paths.push(path);
-    }
+pub fn load_wallets(n: usize, fund: u64) -> Vec<Wallet> {
+    match load_fund_addrs() {
+        Ok(addrs) => {
+            let mut wallets: Vec<Wallet> = create_wallets(addrs.clone(), fund);
+            let mut paths = vec![];
+            for addr in addrs {
+                let path = ROOT.to_owned() + &format!("{}", addr)[0..8].to_owned() + ".txt";
+                paths.push(path);
+            }
 
-    load_keypair(&mut wallets, paths);
-    wallets
+            load_keypair(&mut wallets, paths);
+            wallets
+        }
+        Err(e) => {
+            info!("读取本地账户信息失败:{}，现在创建新账户", e);
+            save_wallets(n, fund)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -144,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_load_wallets() {
-        let test = load_wallets(100);
+        let test = load_wallets(10, 100);
         println!("{:?}", test)
     }
 }
