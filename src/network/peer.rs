@@ -3,7 +3,7 @@ use super::message;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tracing::trace;
+use tracing::{debug, trace};
 
 pub fn new(stream: &TcpStream) -> std::io::Result<(UnboundedReceiver<Vec<u8>>, Handle)> {
     let (write_sender, write_receiver) = mpsc::unbounded_channel(); // TODO: think about the buffer size here
@@ -27,8 +27,6 @@ pub struct Handle {
     write_queue: mpsc::UnboundedSender<Vec<u8>>,
 }
 
-unsafe impl Send for Handle {}
-
 impl Handle {
     pub fn write(&mut self, msg: message::Message) {
         // TODO: return result
@@ -37,5 +35,6 @@ impl Handle {
         if self.write_queue.send(buffer).is_err() {
             trace!("Trying to send to disconnected peer");
         }
+        debug!("发送消息{:?}", msg);
     }
 }

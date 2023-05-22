@@ -159,7 +159,7 @@ impl TransactionGenerator {
                 // PERFORMANCE_COUNTER.record_generate_transaction(&transaction);
                 match transaction {
                     Ok(t) => {
-                        debug!("{:?}", t);
+                        // debug!("{:?}", t);
                         new_transaction(t, &self.mempool, &self.server);
                         // if we are in stepping mode, decrease the step count
                         if let State::Step(step_count) = self.state {
@@ -196,7 +196,8 @@ impl TransactionGenerator {
 pub mod tests {
     use std::{net::SocketAddr, sync::Arc};
 
-    use tokio::sync::mpsc;
+    use crossbeam::channel::unbounded;
+    use tokio::sync::mpsc::{self, unbounded_channel};
     use tracing::{debug, Level};
     use tracing_subscriber::FmtSubscriber;
 
@@ -230,7 +231,7 @@ pub mod tests {
         let p2p_addr = "127.0.0.1:8079".parse::<SocketAddr>().unwrap();
 
         // create channels between server and worker, worker and miner, miner and worker
-        let (msg_tx, _msg_rx) = mpsc::channel(100);
+        let (msg_tx, _msg_rx) = unbounded_channel();
 
         let (server_ctx, server) = server::new(p2p_addr, msg_tx).unwrap();
         server_ctx.start().unwrap();

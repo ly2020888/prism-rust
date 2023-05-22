@@ -11,14 +11,15 @@ use tracing_subscriber::FmtSubscriber;
 // use prism::ledger_manager::LedgerManager;
 use crate::clap::Parser;
 use prism::balancedb::BalanceDatabase;
-use prism::miner;
 use prism::miner::memory_pool::MemoryPool;
+use prism::miner::{self, ContextUpdateSignal};
 use prism::network::server;
 use prism::network::worker;
 // use prism::visualization::Server as VisualizationServer;
 use prism::cmd::{self, Cli};
 use std::fs;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, info, Level};
 
@@ -71,7 +72,7 @@ async fn main() {
     let p2p_addr = cli.p2p.parse::<SocketAddr>().unwrap();
 
     // create channels between server and worker, worker and miner, miner and worker
-    let (msg_tx, msg_rx) = mpsc::channel(100); // TODO: make this buffer adjustable
+    let (msg_tx, msg_rx) = unbounded_channel(); // TODO: make this buffer adjustable
     let (ctx_tx, ctx_rx) = unbounded_channel();
     let ctx_tx_miner = ctx_tx.clone();
 
@@ -148,10 +149,25 @@ async fn main() {
 }
 
 fn init(cli: &Cli) {
-    let _ = fs::create_dir(cli.block_db.clone());
-    let _ = fs::create_dir(cli.balancedb.clone());
-    let _ = fs::create_dir(cli.blockchain_db.clone());
-    let _ = fs::create_dir("./wallets");
+    if Path::new(&cli.block_db).exists() {
+        fs::remove_dir_all(&cli.block_db).unwrap();
+    }
+    fs::create_dir(cli.block_db.clone()).unwrap();
+
+    if Path::new(&cli.balancedb).exists() {
+        fs::remove_dir_all(&cli.balancedb).unwrap();
+    }
+    fs::create_dir(cli.balancedb.clone()).unwrap();
+
+    if Path::new(&cli.blockchain_db).exists() {
+        fs::remove_dir_all(&cli.blockchain_db).unwrap();
+    }
+    fs::create_dir(cli.blockchain_db.clone()).unwrap();
+
+    if Path::new("./wallets").exists() {
+        fs::remove_dir_all("./wallets").unwrap();
+    }
+    fs::create_dir("./wallets").unwrap();
     // a builder for `FmtSubscriber`.
     let subscriber = FmtSubscriber::builder()
         // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)

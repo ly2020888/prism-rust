@@ -240,18 +240,19 @@ impl Context {
             match verify_result {
                 BlockResult::Pass => {
                     // 启动本地共识
-                    debug!("取得合法的区块：{:?}", block);
-                    let result = self.blockchain.concensus(&block);
-                    match result {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("{:?}", e);
-                        }
-                    }
+                    // debug!("取得合法的区块：{:?}", block);
+                    // let result = self.blockchain.concensus(&block);
+                    // match result {
+                    //     Ok(_) => {}
+                    //     Err(e) => {
+                    //         error!("{:?}", e);
+                    //     }
+                    // }
 
                     // 广播区块
+
                     self.server
-                        .broadcast(Message::NewBlockHashes(vec![block_header.hash.unwrap()]))
+                        .broadcast(Message::Ping("zzz".to_string()))
                         .await;
                 }
                 result => {
@@ -280,8 +281,12 @@ fn get_time() -> u128 {
 mod tests {
     use super::*;
     use crate::{
-        blockdb::BlockDatabase, experiment::transaction_generator, miner::memory_pool::MemoryPool,
-        network::server, wallet,
+        balancedb::BalanceDatabase,
+        blockdb::BlockDatabase,
+        experiment::transaction_generator,
+        miner::memory_pool::MemoryPool,
+        network::{server, worker},
+        wallet,
     };
     use std::{net::SocketAddr, sync::Arc};
     use tokio::sync::mpsc;
@@ -304,75 +309,94 @@ mod tests {
     #[test]
     fn test_mine_block() {
         init();
-        let mempool_size = 1_000_000;
-        let mempool = MemoryPool::new(mempool_size);
-        let mempool = Arc::new(std::sync::Mutex::new(mempool));
-        debug!("Initialized mempool, maximum size set to {}", mempool_size);
-
-        // start the p2p server
-        // parse p2p server address
-        let p2p_addr = "127.0.0.1:8079".parse::<SocketAddr>().unwrap();
-
-        // create channels between server and worker, worker and miner, miner and worker
-        let (msg_tx, _msg_rx) = mpsc::channel(100);
-
-        let (server_ctx, server) = server::new(p2p_addr, msg_tx).unwrap();
-        server_ctx.start().unwrap();
-
-        let wallets = wallet::util::load_wallets(10, 1_000_000);
-
-        let (txgen_ctx, _txgen_control_chan) =
-            transaction_generator::TransactionGenerator::new(wallets, &server, &mempool);
-        txgen_ctx.start();
-
-        let (test_channel_tx, test_channel_rc) = unbounded_channel::<ContextUpdateSignal>();
-
-        let test_config = BlockchainConfig::new(2, 256, 1000, 10, 1, 10);
-
-        // init block database
-        let blockdb = BlockDatabase::new("./rocksdb/blockcdb", test_config.clone()).unwrap();
-        let blockdb = Arc::new(blockdb);
-        debug!("Initialized block database");
-
-        // start the miner
-        // 注：miner无挖矿动作，仅仅是按照固定速率打包区块
-        // TODO:添加挖矿逻辑
-
-        // init blockchain database
-        // 共识层
-        let blockchain =
-            BlockChain::new("./rocksdb/blockchain", blockdb.clone(), test_config.clone()).unwrap();
-        let blockchain = Arc::new(blockchain);
-        debug!("Initialized blockchain database");
-
-        let (miner_ctx, miner) = super::new(
-            &mempool,
-            &blockchain,
-            &blockdb,
-            test_channel_rc,
-            &test_channel_tx,
-            &server,
-            test_config,
-        );
         let rt = tokio::runtime::Runtime::new().unwrap();
-        miner.start(10, false);
+
         rt.block_on(async move {
-            test_channel_tx
-                .clone()
-                .send(ContextUpdateSignal::NewProposerBlock)
-                .unwrap();
-            test_channel_tx
-                .clone()
-                .send(ContextUpdateSignal::NewProposerBlock)
-                .unwrap();
+            let mempool_size = 1_000_000;
+            let mempool = MemoryPool::new(mempool_size);
+            let mempool = Arc::new(std::sync::Mutex::new(mempool));
+            debug!("Initialized mempool, maximum size set to {}", mempool_size);
 
+            // start the p2p server
+            // parse p2p server address
+            let p2p_addr = "127.0.0.1:7000".parse::<SocketAddr>().unwrap();
+
+            // create channels between server and worker, worker and miner, miner and worker
+            let (msg_tx, _msg_rx) = unbounded_channel();
+
+            let (server_ctx, server) = server::new(p2p_addr, msg_tx).unwrap();
+            server_ctx.start().unwrap();
+
+            let known_peers = vec!["127.0.0.1:7001".to_string()];
+            server::connect_known_peers(known_peers, server.clone());
+
+            let wallets = wallet::util::load_wallets(10, 1_000_000);
+
+            let (txgen_ctx, _txgen_control_chan) =
+                transaction_generator::TransactionGenerator::new(wallets, &server, &mempool);
+            txgen_ctx.start();
+
+            let (test_channel_tx, test_channel_rc) = unbounded_channel::<ContextUpdateSignal>();
+
+            let test_config = BlockchainConfig::new(2, 256, 1000, 10, 1, 10);
+
+            // init block database
+            let blockdb = BlockDatabase::new("./rocksdb/blockcdb", test_config.clone()).unwrap();
+            let blockdb = Arc::new(blockdb);
+            debug!("Initialized block database");
+
+            // init balance database
+            let balancedb = BalanceDatabase::new("./rocksdb/balancedb").unwrap();
+            let balancedb = Arc::new(balancedb);
+            debug!("Initialized balance database");
+
+            // start the miner
+            // 注：miner无挖矿动作，仅仅是按照固定速率打包区块
+            // TODO:添加挖矿逻辑
+
+            // init blockchain database
+            // 共识层
+            let blockchain =
+                BlockChain::new("./rocksdb/blockchain", blockdb.clone(), test_config.clone())
+                    .unwrap();
+            let blockchain = Arc::new(blockchain);
+            debug!("Initialized blockchain database");
+
+            let (miner_ctx, miner) = super::new(
+                &mempool,
+                &blockchain,
+                &blockdb,
+                test_channel_rc,
+                &test_channel_tx,
+                &server,
+                test_config.clone(),
+            );
+
+            miner.start(10, false);
             miner_ctx.start().await;
-        });
 
-        let known_peers = vec!["127.0.0.1:8078".to_string()];
-        server::connect_known_peers(known_peers, server.clone());
-        loop {
-            std::thread::park();
-        }
+            test_channel_tx
+                .clone()
+                .send(ContextUpdateSignal::NewProposerBlock)
+                .unwrap();
+
+            let p2p_workers = 1;
+            let worker_ctx = worker::new(
+                p2p_workers,
+                _msg_rx,
+                &blockchain,
+                &blockdb,
+                &balancedb,
+                &mempool,
+                test_channel_tx,
+                &server,
+                test_config,
+            );
+            worker_ctx.start();
+
+            loop {
+                std::thread::park();
+            }
+        });
     }
 }

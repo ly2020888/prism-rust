@@ -15,12 +15,13 @@ use crate::network::server::Handle as ServerHandle;
 use crate::validation::{self, BlockResult};
 use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::Mutex;
-use tracing::{debug, warn};
 
-type MsgChan = Arc<Mutex<Receiver<(Vec<u8>, peer::Handle)>>>;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+
+use tokio::sync::Mutex;
+use tracing::{debug, info, warn};
+
+type MsgChan = Arc<Mutex<UnboundedReceiver<(Vec<u8>, peer::Handle)>>>;
 
 #[derive(Clone)]
 pub struct Context {
@@ -40,7 +41,7 @@ pub struct Context {
 
 pub fn new(
     num_worker: u64,
-    msg_src: Receiver<(Vec<u8>, peer::Handle)>,
+    msg_src: UnboundedReceiver<(Vec<u8>, peer::Handle)>,
     blockchain: &Arc<BlockChain>,
     blockdb: &Arc<BlockDatabase>,
     balancedb: &Arc<BalanceDatabase>,
@@ -70,30 +71,34 @@ impl Context {
         let num_worker = self.num_worker;
         for i in 0..num_worker {
             let cloned = self.clone();
-            let msg_chan = Arc::clone(&self.msg_chan);
 
             tokio::spawn(async move {
-                cloned.worker_loop(msg_chan).await;
+                cloned.worker_loop().await;
                 warn!("Worker thread {} exited", i);
             });
         }
     }
 
-    async fn worker_loop(&self, msg_chan: MsgChan) {
+    async fn worker_loop(&self) {
+        let msg_chan = Arc::clone(&self.msg_chan);
+
         loop {
-            let mut msg_chan = msg_chan.lock().await;
-            let msg = msg_chan.recv().await.unwrap();
+            let (msg, mut peer) = {
+                let mut msg_chan = msg_chan.lock().await;
+                msg_chan.recv().await.unwrap()
+            };
 
             // PERFORMANCE_COUNTER.record_process_message();
-            let (msg, mut peer) = msg;
+
             let msg: Message = bincode::deserialize(&msg).unwrap();
+
             match msg {
                 Message::Ping(nonce) => {
                     debug!("Ping: {}", nonce);
-                    peer.write(Message::Pong(nonce.to_string()));
+                    peer.write(Message::Pong(nonce));
                 }
                 Message::Pong(nonce) => {
-                    debug!("Pong: {}", nonce);
+                    info!("Pong: {}", nonce);
                 }
                 Message::NewTransactionHashes(hashes) => {
                     debug!("Got {} new transaction hashes", hashes.len());

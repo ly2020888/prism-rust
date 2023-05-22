@@ -8,10 +8,11 @@ use std::time;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, trace};
 pub fn new(
     addr: std::net::SocketAddr,
-    msg_sink: Sender<(Vec<u8>, peer::Handle)>,
+    msg_sink: UnboundedSender<(Vec<u8>, peer::Handle)>,
 ) -> std::io::Result<(Context, Handle)> {
     let (control_signal_sender, control_signal_receiver) = channel(10000);
 
@@ -33,7 +34,7 @@ pub struct Context {
     addr: std::net::SocketAddr,
     control_signal_receiver: Receiver<ControlSignal>,
     control_sender: Sender<ControlSignal>,
-    new_msg_chan: Sender<(Vec<u8>, peer::Handle)>,
+    new_msg_chan: UnboundedSender<(Vec<u8>, peer::Handle)>,
 }
 
 impl Context {
@@ -87,6 +88,7 @@ impl Context {
                     for (_, hd) in self.peers.iter_mut() {
                         hd.write(msg.clone());
                     }
+                    trace!("done");
                 }
                 ControlSignal::GetNewPeer(stream) => {
                     trace!("Processing GetNewPeer command");
@@ -147,9 +149,10 @@ impl Context {
             let mut msg_buffer: Vec<u8> = vec![];
             loop {
                 // first, read exactly 4 bytes to get the frame header
-                let msg_size = match reader.get_mut().read_exact(&mut size_buffer).await {
+                let msg_size = match reader.read_exact(&mut size_buffer).await {
                     Ok(_) => u32::from_be_bytes(size_buffer),
-                    Err(_) => {
+                    Err(e) => {
+                        error!("{:?}", e);
                         break;
                     }
                 };
@@ -163,9 +166,15 @@ impl Context {
                 {
                     Ok(_) => {
                         let new_payload: Vec<u8> = msg_buffer[0..msg_size as usize].to_vec();
-                        let _ = new_msg_chan.send((new_payload, handle_copy.clone())).await;
+                        let buffer: message::Message = bincode::deserialize(&new_payload).unwrap();
+                        info!("刚刚收到消息{:?}", buffer);
+                        // info!("{:?},{:?}", new_payload, handle_copy);
+                        if let Err(e) = new_msg_chan.send((new_payload, handle_copy.clone())) {
+                            error!("收到回信时出错:{}", e);
+                        }
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        error!("{:?}", e);
                         break;
                     }
                 }
@@ -179,6 +188,8 @@ impl Context {
             loop {
                 // first, get a message to write from the queue
                 let new_msg = write_queue.recv().await.unwrap();
+                let buffer: message::Message = bincode::deserialize(&new_msg).unwrap();
+                info!("准备发送消息{:?}", buffer);
 
                 // second, encode the length of the message
                 let size_buffer = (new_msg.len() as u32).to_be_bytes();
