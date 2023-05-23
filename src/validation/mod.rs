@@ -4,7 +4,7 @@ mod voter_block;
 
 use tracing::info;
 
-use crate::balancedb::{self, BalanceDatabase};
+use crate::balancedb::BalanceDatabase;
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;

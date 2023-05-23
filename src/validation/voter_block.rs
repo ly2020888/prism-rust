@@ -29,8 +29,3 @@ pub fn get_missing_references(
 
     missing_blocks
 }
-
-pub fn check_chain_number(content: &Content, blockchain: &BlockChain) -> bool {
-    let chain_num = blockchain.voter_chain_number(&content.parent).unwrap();
-    chain_num == content.chain_id
-}

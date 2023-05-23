@@ -2,7 +2,7 @@ use super::buffer::BlockBuffer;
 use super::message::Message;
 use super::peer;
 use crate::balancedb::BalanceDatabase;
-use crate::block::{Block, Content};
+use crate::block::Block;
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
 use crate::config::*;
@@ -31,12 +31,12 @@ pub struct Context {
     blockdb: Arc<BlockDatabase>,
     balancedb: Arc<BalanceDatabase>,
     mempool: Arc<std::sync::Mutex<MemoryPool>>,
-    context_update_chan: UnboundedSender<ContextUpdateSignal>,
+    _context_update_chan: UnboundedSender<ContextUpdateSignal>,
     server: ServerHandle,
     buffer: Arc<Mutex<BlockBuffer>>,
     recent_blocks: Arc<Mutex<HashSet<H256>>>, // blocks that we have received but not yet inserted
     requested_blocks: Arc<Mutex<HashSet<H256>>>, // blocks that we have requested but not yet received
-    config: BlockchainConfig,
+    _config: BlockchainConfig,
 }
 
 pub fn new(
@@ -57,12 +57,12 @@ pub fn new(
         blockdb: Arc::clone(blockdb),
         balancedb: Arc::clone(balancedb),
         mempool: Arc::clone(mempool),
-        context_update_chan: ctx_update_sink,
+        _context_update_chan: ctx_update_sink,
         server: server.clone(),
         buffer: Arc::new(Mutex::new(BlockBuffer::new())),
         recent_blocks: Arc::new(Mutex::new(HashSet::new())),
         requested_blocks: Arc::new(Mutex::new(HashSet::new())),
-        config,
+        _config: config,
     }
 }
 
@@ -173,7 +173,7 @@ impl Context {
                     let mut hashes: Vec<H256> = vec![];
                     for encoded_block in &encoded_blocks {
                         let block: Block = bincode::deserialize(&encoded_block).unwrap();
-                        let hash = block.hash();
+                        let hash = block.header.hash.unwrap();
 
                         // now that the block that we request has arrived, remove it from the set
                         // of requested blocks. removing it at this stage causes a race condition,
@@ -235,7 +235,6 @@ impl Context {
                     // process each block
                     let mut to_process: Vec<Block> = blocks;
                     let mut to_request: Vec<H256> = vec![];
-                    let mut context_update_sig = vec![];
                     while let Some(block) = to_process.pop() {
                         // check data availability
                         // make sure checking data availability and buffering are one atomic
@@ -260,7 +259,9 @@ impl Context {
                                 drop(buffer);
                                 continue;
                             }
-                            _ => unreachable!(),
+                            bad_result => {
+                                warn!("非法区块{:8} {}", block.header.hash.unwrap(), bad_result);
+                            }
                         }
 
                         debug!("Processing block {:.8}", block.hash());
@@ -271,10 +272,7 @@ impl Context {
                             &self.chain,
                             &self.server,
                         );
-                        context_update_sig.push(match &block.content {
-                            Content::Proposer(_) => ContextUpdateSignal::NewProposerBlock,
-                            Content::Voter(_) => ContextUpdateSignal::NewVoterBlock,
-                        });
+
                         let mut buffer = self.buffer.lock().await;
                         let mut resolved_by_current = buffer.satisfy(block.hash());
                         drop(buffer);
@@ -287,10 +285,6 @@ impl Context {
                         for b in resolved_by_current.drain(..) {
                             to_process.push(b);
                         }
-                    }
-                    // tell the miner to update the context
-                    for sig in context_update_sig {
-                        self.context_update_chan.send(sig).unwrap();
                     }
 
                     if !to_request.is_empty() {

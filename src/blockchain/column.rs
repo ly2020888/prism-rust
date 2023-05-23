@@ -11,11 +11,6 @@ pub const VOTER_NODE_CHAIN_CF: &str = "VOTER_NODE_CHAIN";
 /// level (u64) to hashes of blocks (Vec<hash>)
 pub const PROPOSER_TREE_LEVEL_CF: &str = "PROPOSER_TREE_LEVEL";
 
-/// level (u64) to the list of proposer blocks confirmed
-/// by this level, including the leader itself. The list
-/// is in the order that those blocks should live in the ledger.
-pub const PROPOSER_LEDGER_ORDER_CF: &str = "PROPOSER_LEDGER_ORDER";
-
 /// number of all votes on a block
 pub const PROPOSER_VOTE_COUNT_CF: &str = "PROPOSER_VOTE_COUNT";
 

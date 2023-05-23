@@ -5,17 +5,17 @@ use crate::block::content;
 use crate::block::header::Header;
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
+use crate::config::*;
 use crate::crypto::hash::{Hashable, H256};
 use crate::crypto::merkle::MerkleTree;
 use crate::network::message::Message;
-use crate::{balancedb, config::*};
 // use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 // use crate::handler::new_validated_block;
 use crate::blockdb::BlockDatabase;
 use crate::network::server::Handle as ServerHandle;
 use crate::validation::check_data_availability;
 use crate::validation::BlockResult;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use memory_pool::MemoryPool;
 use std::sync::{Arc, Mutex};
@@ -248,15 +248,20 @@ impl Context {
 
             match verify_result {
                 BlockResult::Pass => {
+                    // 将新的区块存放在数据库中
+                    if let Err(e) = self.blockdb.insert(&block) {
+                        error!("存储区块遇到错误{:?}", e);
+                        continue;
+                    }
+
                     // 启动本地共识
-                    // debug!("取得合法的区块：{:?}", block);
-                    // let result = self.blockchain.concensus(&block);
-                    // match result {
-                    //     Ok(_) => {}
-                    //     Err(e) => {
-                    //         error!("{:?}", e);
-                    //     }
-                    // }
+                    let result = self.blockchain.concensus(&block);
+                    match result {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("{:?}", e);
+                        }
+                    }
 
                     // 广播区块
                     self.server

@@ -7,7 +7,6 @@ use crate::transaction::{Account, Address, Authorization, Transaction};
 use ed25519_dalek::Keypair;
 use ed25519_dalek::{SignatureError, Signer};
 use rand::rngs::OsRng;
-use serde::Serialize;
 use std::fmt;
 use std::time::SystemTime;
 pub use util::*;

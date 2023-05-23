@@ -13,7 +13,6 @@ pub fn check_transactions(
     transactions: &[Transaction],
     balancedb: &BalanceDatabase,
 ) -> BlockResult {
-    let mut start = true;
     for tx in transactions {
         if !check_non_zero(tx) {
             return BlockResult::ZeroValue;

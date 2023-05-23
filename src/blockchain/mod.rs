@@ -1,22 +1,19 @@
 /// ! 共识层
 mod column;
-use crate::block::{content, header, Block, Content};
+use crate::balancedb::BalanceDatabase;
+use crate::block::{content, Block, Content};
 use crate::blockdb::BlockDatabase;
 use crate::config::*;
-use crate::crypto::hash::{Hashable, H256};
+use crate::crypto::hash::H256;
 use column::*;
-
+use std::collections::VecDeque;
 //use crate::experiment::performance_counter::PERFORMANCE_COUNTER;
 use bincode::{deserialize, serialize};
 use rand::Rng;
 use rocksdb::{ColumnFamilyDescriptor, MergeOperands, Options, WriteBatch, DB};
-use statrs::distribution::{Discrete, Poisson};
-use tracing::{debug, info, warn};
-
-use std::collections::{BTreeMap, HashMap, HashSet};
-
-use std::ops::{DerefMut, Range};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use tracing::{debug, info};
 
 pub type Result<T> = std::result::Result<T, rocksdb::Error>;
 
@@ -25,6 +22,7 @@ pub struct BlockChain {
     unconfirmed_proposers: Mutex<HashSet<H256>>,
     proposer_ledger_tip: Mutex<u64>,
     blockdb: Arc<BlockDatabase>,
+    balancedb: Arc<BalanceDatabase>,
     voter_ledger_tips: Mutex<Vec<H256>>,
     config: BlockchainConfig,
 }
@@ -38,6 +36,7 @@ impl BlockChain {
         path: P,
         blockdb: Arc<BlockDatabase>,
         config: BlockchainConfig,
+        balancedb: Arc<BalanceDatabase>,
     ) -> Result<Self> {
         let mut cfs: Vec<ColumnFamilyDescriptor> = vec![];
         macro_rules! add_cf {
@@ -89,6 +88,7 @@ impl BlockChain {
             proposer_ledger_tip: Mutex::new(0),
             voter_ledger_tips: Mutex::new(vec![H256::default(); config.voter_chains as usize]),
             config,
+            balancedb,
         };
 
         Ok(blockchain_db)
@@ -100,16 +100,17 @@ impl BlockChain {
         path: P,
         blockdb: Arc<BlockDatabase>,
         config: BlockchainConfig,
+        balancedb: Arc<BalanceDatabase>,
     ) -> Result<Self> {
         DB::destroy(&Options::default(), &path)?;
-        let db = Self::open(&path, blockdb, config)?;
+        let db = Self::open(&path, blockdb, config, balancedb)?;
         // get cf handles
         let voter_node_chain_cf = db.db.cf_handle(VOTER_NODE_CHAIN_CF).unwrap();
-        let proposer_tree_level_cf = db.db.cf_handle(PROPOSER_TREE_LEVEL_CF).unwrap();
+        // let proposer_tree_level_cf = db.db.cf_handle(PROPOSER_TREE_LEVEL_CF).unwrap();
 
         let parent_neighbor_cf = db.db.cf_handle(PARENT_NEIGHBOR_CF).unwrap();
-        let proposer_vote_count_cf = db.db.cf_handle(PROPOSER_VOTE_COUNT_CF).unwrap();
-        let block_ref_neighbor_cf = db.db.cf_handle(BLOCK_REF_NEIGHBOR_CF).unwrap();
+        // let proposer_vote_count_cf = db.db.cf_handle(PROPOSER_VOTE_COUNT_CF).unwrap();
+        // let block_ref_neighbor_cf = db.db.cf_handle(BLOCK_REF_NEIGHBOR_CF).unwrap();
         let proposer_node_level_cf = db.db.cf_handle(PROPOSER_NODE_LEVEL_CF).unwrap();
 
         // insert genesis blocks
@@ -191,7 +192,7 @@ impl BlockChain {
                 // 收到一个proposer区块，更新相关的列族，更新累计权重。
                 // add ref'ed blocks
                 // note that the parent is the first proposer block that we refer
-                let mut refed_proposer: Vec<H256> = vec![parent_hash];
+                let mut refed_proposer: Vec<H256> = vec![];
                 refed_proposer.extend(&content.refs);
 
                 put_value!(block_ref_neighbor_cf, block_hash, refed_proposer);
@@ -251,7 +252,7 @@ impl BlockChain {
 
                 // add ref'ed blocks
                 // note that the parent is the first proposer block that we refer
-                let mut refed_proposer: Vec<H256> = vec![parent_hash];
+                let mut refed_proposer: Vec<H256> = vec![];
                 refed_proposer.extend(&content.refs);
                 put_value!(block_ref_neighbor_cf, block_hash, refed_proposer);
 
@@ -431,10 +432,60 @@ impl BlockChain {
                     .unwrap(),
             )
             .unwrap();
-            debug!("未提交proposer区块{:.8}, weight:{}", proposer_block, weight);
+            info!("proposer区块{:.8}, weight:{}", proposer_block, weight);
+            if weight >= self.config.confirm.into() {
+                info!("proposer区块{:.8}, 进入提交阶段", proposer_block);
+                self.confirm_block(proposer_block);
+            }
         }
-        // unimplemented!();
         Ok(())
+    }
+
+    // 图的宽序遍历，每层排序
+    fn confirm_block(&self, start: &H256) {
+        let mut deq = VecDeque::from([*start]);
+
+        while deq.len() > 0 {
+            let front_hash = deq.remove(0).unwrap(); // 如果在提交阶段出现越界则直接panic！
+            if !self.blockdb.is_confirmed(&front_hash) {
+                // 区块未提交的情况
+                // step 1. 执行本区块的交易
+                let res = self.blockdb.get(&front_hash);
+                let mut refs;
+                match res {
+                    Ok(op) => match op {
+                        Some(block) => match block.content {
+                            Content::Proposer(content) => {
+                                self.balancedb
+                                    .execute_transactions(&content.transactions)
+                                    .unwrap();
+                                refs = content.refs;
+                            }
+                            Content::Voter(content) => {
+                                self.balancedb
+                                    .execute_transactions(&content.transactions)
+                                    .unwrap();
+                                refs = content.refs;
+                            }
+                        },
+                        None => {
+                            panic!("{:8}区块提交阶段出错:数据库中不存在该区块", front_hash);
+                        }
+                    },
+                    Err(e) => {
+                        panic!("{:8}区块提交阶段出错:{:?}", front_hash, e);
+                    }
+                }
+                // step 2. 检索其后续区块
+                refs.sort_unstable(); // 对hash进行排序
+                deq.extend(refs); // 附加
+                self.blockdb.to_confirmed(&front_hash).unwrap();
+            } else {
+                // 区块已提交的情况
+                continue;
+            }
+        }
+        info!("{:8}区块已提交", start);
     }
 
     // 这个函数负责从rocksdb中读取未到达阈值的领导者区块

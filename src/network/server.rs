@@ -7,8 +7,8 @@ use std::net::SocketAddr;
 use std::time;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpSocket, TcpStream};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, trace};
 pub fn new(
     addr: std::net::SocketAddr,

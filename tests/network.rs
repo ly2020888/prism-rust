@@ -78,8 +78,13 @@ fn test_mine_block() {
 
         // init blockchain database
         // 共识层
-        let blockchain =
-            BlockChain::new("./rocksdb/blockchain", blockdb.clone(), test_config.clone()).unwrap();
+        let blockchain = BlockChain::new(
+            "./rocksdb/blockchain",
+            blockdb.clone(),
+            test_config.clone(),
+            balancedb.clone(),
+        )
+        .unwrap();
 
         let blockchain = Arc::new(blockchain);
         debug!("Initialized blockchain database");

@@ -63,7 +63,13 @@ async fn main() {
     debug!("Initialized balance database");
 
     // init blockchain database
-    let blockchain = BlockChain::new(cli.blockchain_db, blockdb.clone(), config.clone()).unwrap();
+    let blockchain = BlockChain::new(
+        cli.blockchain_db,
+        blockdb.clone(),
+        config.clone(),
+        balancedb.clone(),
+    )
+    .unwrap();
     let blockchain = Arc::new(blockchain);
     debug!("Initialized blockchain database");
 
@@ -96,7 +102,6 @@ async fn main() {
 
     // start the miner
     // 注：miner无挖矿动作，仅仅是按照固定速率打包区块
-    // TODO:添加挖矿逻辑
     let (miner_ctx, _miner) = miner::new(
         &mempool,
         &blockchain,

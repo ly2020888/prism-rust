@@ -1,5 +1,3 @@
-use std::fmt::{write, Display};
-
 use crate::transaction::{Account, Address, Transaction};
 use bincode::{deserialize, serialize};
 use ed25519_dalek::Keypair;
@@ -86,12 +84,8 @@ impl BalanceDatabase {
         &self,
         transactions: &Vec<Transaction>,
     ) -> Result<(), BalanceError> {
-        // use batch for the transaction
-        let mut wb = rocksdb::WriteBatch::default();
-
         // check whether the inputs used in this transaction are all unspent, and whether the value
         // field in inputs are correct, and whether all owners have signed the transaction
-        let account_level = self.db.cf_handle(ACCOUNT_LEVEL).unwrap();
 
         for t in transactions {
             let mut input_account: Account = self.get_account(&t.input_account)?;
@@ -118,7 +112,6 @@ impl BalanceDatabase {
         // TODO: we don't write to wal here, so should the program crash, the db will be in
         // an inconsistent state. The solution here is to manually flush the memtable to
         // the disk at certain time, and manually log the state (e.g. voter tips, etc.)
-        self.db.write_without_wal(wb)?;
         Ok(())
     }
 
@@ -145,7 +138,7 @@ impl BalanceDatabase {
             account_level,
             serialize(&account.address)?,
             serialize(account)?,
-        );
+        )?;
         Ok(())
     }
 
@@ -165,7 +158,7 @@ impl BalanceDatabase {
     pub fn insert_keypair(&self, address: &Address, keypair: &Keypair) -> Result<(), BalanceError> {
         let keypair_level = self.db.cf_handle(KEYPAIR_LEVEL).unwrap();
         self.db
-            .put_cf(keypair_level, serialize(&address)?, keypair.to_bytes());
+            .put_cf(keypair_level, serialize(&address)?, keypair.to_bytes())?;
         Ok(())
     }
 }

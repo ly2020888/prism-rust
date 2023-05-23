@@ -73,6 +73,7 @@ impl BlockDatabase {
         let block_cf = db.db.cf_handle(BLOCK_CF).unwrap();
         let block_arrival_order_cf = db.db.cf_handle(BLOCK_ARRIVAL_ORDER_CF).unwrap();
         let block_sequence_number_cf = db.db.cf_handle(BLOCK_SEQUENCE_NUMBER_CF).unwrap();
+        let block_comfirmed_cf = db.db.cf_handle(BLOCK_SEQUENCE_NUMBER_CF).unwrap();
 
         let mut counter: u64 = 0;
 
@@ -92,6 +93,13 @@ impl BlockDatabase {
                 block_sequence_number_cf,
                 &config.genesis_hashes[i as usize],
                 &counter.to_ne_bytes(),
+            )?;
+
+            // 初始区块全部默认提交
+            db.db.put_cf(
+                block_comfirmed_cf,
+                &config.genesis_hashes[i as usize],
+                &serialize(&voter_genesis(i as u16)).unwrap(),
             )?;
             counter += 1;
         }
@@ -164,6 +172,23 @@ impl BlockDatabase {
             None => Ok(false),
             Some(_) => Ok(true),
         }
+    }
+
+    pub fn is_confirmed(&self, hash: &H256) -> bool {
+        let block_comfirmed_cf = self.db.cf_handle(BLOCK_COMFIRMED_CF).unwrap();
+        let serialized = self.db.get_pinned_cf(block_comfirmed_cf, hash);
+        if let Err(_) = serialized {
+            return false;
+        }
+        match serialized.unwrap() {
+            None => false,
+            Some(_) => true,
+        }
+    }
+
+    pub fn to_confirmed(&self, hash: &H256) -> Result<(), rocksdb::Error> {
+        let block_comfirmed_cf = self.db.cf_handle(BLOCK_COMFIRMED_CF).unwrap();
+        self.db.put_cf(block_comfirmed_cf, hash, hash)
     }
 
     pub fn blocks_after(&self, after: &H256, batch_size: u64) -> BlocksInArrivalOrder {

@@ -1,5 +1,4 @@
 use crate::crypto::hash::H256;
-use bigint::uint::U256;
 
 // const PROPOSER_TX_REF_HEADROOM: f32 = 10.0;
 // const SORTITION_PRECISION: u64 = std::u64::MAX;

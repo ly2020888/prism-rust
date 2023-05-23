@@ -9,7 +9,7 @@ use rand::Rng;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 pub enum ControlSignal {
     Start(u64),
@@ -196,8 +196,7 @@ impl TransactionGenerator {
 pub mod tests {
     use std::{net::SocketAddr, sync::Arc};
 
-    use crossbeam::channel::unbounded;
-    use tokio::sync::mpsc::{self, unbounded_channel};
+    use tokio::sync::mpsc::unbounded_channel;
     use tracing::{debug, Level};
     use tracing_subscriber::FmtSubscriber;
 
