@@ -241,8 +241,12 @@ impl Context {
                         // make sure checking data availability and buffering are one atomic
                         // operation. see the comments in buffer.rs
                         let mut buffer = self.buffer.lock().await;
-                        let data_availability =
-                            validation::check_data_availability(&block, &self.chain, &self.blockdb);
+                        let data_availability = validation::check_data_availability(
+                            &block,
+                            &self.chain,
+                            &self.blockdb,
+                            &self.balancedb,
+                        );
                         match data_availability {
                             BlockResult::Pass => drop(buffer),
                             BlockResult::MissingReferences(r) => {

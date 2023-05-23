@@ -4,6 +4,7 @@ mod voter_block;
 
 use tracing::info;
 
+use crate::balancedb::{self, BalanceDatabase};
 use crate::block::{Block, Content};
 use crate::blockchain::BlockChain;
 use crate::blockdb::BlockDatabase;
@@ -26,6 +27,7 @@ pub enum BlockResult {
     ZeroValue,
     InsufficientInput,
     WrongSignature,
+    RocksdbErr,
 }
 
 impl std::fmt::Display for BlockResult {
@@ -44,6 +46,7 @@ impl std::fmt::Display for BlockResult {
             BlockResult::InsufficientInput => write!(f, "insufficient input"),
             BlockResult::WrongSignature => write!(f, "signature mismatch"),
             BlockResult::WrongProposerBlock => write!(f, "错误的领导者区块，不符合连接规则"),
+            BlockResult::RocksdbErr => write!(f, "在访问数据库时发生错误"),
         }
     }
 }
@@ -53,6 +56,7 @@ pub fn check_data_availability(
     block: &Block,
     blockchain: &BlockChain,
     blockdb: &BlockDatabase,
+    balancedb: &BalanceDatabase,
 ) -> BlockResult {
     let mut missing = vec![];
 
@@ -91,11 +95,12 @@ pub fn check_data_availability(
             }
         }
     }
+    // 检查block内的交易是否合法
 
     if !missing.is_empty() {
         BlockResult::MissingReferences(missing)
     } else {
-        BlockResult::Pass
+        check_transactions(&block, balancedb)
     }
 }
 
@@ -104,6 +109,18 @@ fn check_block_exists(hash: H256, blockchain: &BlockChain) -> bool {
     match blockchain.contains_transaction(&hash) {
         Err(e) => panic!("Blockchain error {}", e),
         Ok(b) => b,
+    }
+}
+
+fn check_transactions(block: &Block, balancedb: &BalanceDatabase) -> BlockResult {
+    let content = &block.content;
+    match content {
+        Content::Proposer(content) => {
+            transaction::check_transactions(&content.transactions, balancedb)
+        }
+        Content::Voter(content) => {
+            transaction::check_transactions(&content.transactions, balancedb)
+        }
     }
 }
 

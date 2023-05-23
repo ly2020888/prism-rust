@@ -166,11 +166,10 @@ impl Context {
                 {
                     Ok(_) => {
                         let new_payload: Vec<u8> = msg_buffer[0..msg_size as usize].to_vec();
-                        let buffer: message::Message = bincode::deserialize(&new_payload).unwrap();
-                        info!("刚刚收到消息{:?}", buffer);
+
                         // info!("{:?},{:?}", new_payload, handle_copy);
                         if let Err(e) = new_msg_chan.send((new_payload, handle_copy.clone())) {
-                            error!("收到回信时出错:{}", e);
+                            error!("reply error:{}", e);
                         }
                     }
                     Err(e) => {

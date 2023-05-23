@@ -1,9 +1,40 @@
+use crate::balancedb::BalanceDatabase;
 use crate::transaction::Account;
 use crate::transaction::Transaction;
 use ed25519_dalek::PublicKey;
 use ed25519_dalek::Signature;
+use tracing::error;
 
 use std::convert::TryFrom;
+
+use super::BlockResult;
+
+pub fn check_transactions(
+    transactions: &[Transaction],
+    balancedb: &BalanceDatabase,
+) -> BlockResult {
+    let mut start = true;
+    for tx in transactions {
+        if !check_non_zero(tx) {
+            return BlockResult::ZeroValue;
+        }
+        match balancedb.get_account(&tx.input_account) {
+            Ok(account) => {
+                if !check_sufficient_input(tx, &account) {
+                    return BlockResult::InsufficientInput;
+                }
+            }
+            Err(e) => {
+                error!("获取账户失败:{:?}", e);
+                return BlockResult::EmptyTransaction;
+            }
+        }
+    }
+    if !check_signature_batch(transactions) {
+        return BlockResult::WrongSignature;
+    }
+    BlockResult::Pass
+}
 
 /// Checks that input and output value is not 0
 pub fn check_non_zero(transaction: &Transaction) -> bool {
@@ -11,7 +42,7 @@ pub fn check_non_zero(transaction: &Transaction) -> bool {
 }
 
 /// Checks if input_sum >= output_sum
-pub fn check_sufficient_input(transaction: &Transaction, user: Account) -> bool {
+pub fn check_sufficient_input(transaction: &Transaction, user: &Account) -> bool {
     let input_sum: u64 = user.balance;
     let output_sum: u64 = transaction.value;
     input_sum >= output_sum

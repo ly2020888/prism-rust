@@ -1,6 +1,5 @@
 extern crate clap;
 
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::unbounded_channel;
 // use prism::api::Server as ApiServer;
 use prism::config::BlockchainConfig;
@@ -11,8 +10,8 @@ use tracing_subscriber::FmtSubscriber;
 // use prism::ledger_manager::LedgerManager;
 use crate::clap::Parser;
 use prism::balancedb::BalanceDatabase;
+use prism::miner;
 use prism::miner::memory_pool::MemoryPool;
-use prism::miner::{self, ContextUpdateSignal};
 use prism::network::server;
 use prism::network::worker;
 // use prism::visualization::Server as VisualizationServer;
@@ -102,6 +101,7 @@ async fn main() {
         &mempool,
         &blockchain,
         &blockdb,
+        &balancedb,
         ctx_rx,
         &ctx_tx_miner,
         &server,
